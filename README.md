@@ -112,7 +112,7 @@ Your API key is the key to your wallet. We get it.
 
 This is an open project, and your input shapes it.
 
-**Want to contribute?**
+**Want to contribute?** Please read the [Contributing Guide](CONTRIBUTING.md) first.
 - Add support for new AI providers
 - Polish the UI (we're always improving)
 - Translate to more languages
