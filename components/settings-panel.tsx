@@ -55,6 +55,8 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [useCustomPrompt, setUseCustomPrompt] = useState(false)
   const [copiedDefaultPrompt, setCopiedDefaultPrompt] = useState(false)
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const saveTimer = useRef<NodeJS.Timeout | null>(null)
 
   const [showKey, setShowKey] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -85,41 +87,39 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
     }
   }, [])
 
-  const handleSave = () => {
-    if (!activeProvider) return
-
-    // Update the provider in the list
-    const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
-
-    // Use legacy fields for backward compatibility with existing code that uses settings.apiKey directly
-    const newSettings: Settings = {
-      ...settings,
-      providers: updatedProviders,
-      activeProviderId: activeProvider.id,
-      // Sync legacy fields
-      apiKey: activeProvider.apiKey,
-      apiEndpoint: activeProvider.endpoint,
-      model: activeProvider.model,
-      systemPrompt: useCustomPrompt ? settings.systemPrompt : "",
-    }
-
-    saveSettings(newSettings)
-    setSettings(newSettings)
-    onSettingsChange?.(newSettings)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  const triggerAutoSave = (nextSettings: Settings) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    setAutoSaveStatus("saving")
+    saveTimer.current = setTimeout(() => {
+      try {
+        saveSettings(nextSettings)
+        onSettingsChange?.(nextSettings)
+        setAutoSaveStatus("saved")
+        setTimeout(() => setAutoSaveStatus("idle"), 1500)
+      } catch (error) {
+        console.error("Auto-save failed:", error)
+        setAutoSaveStatus("error")
+      }
+    }, 500)
   }
 
   const handleResetPrompt = () => {
     setSettings({ ...settings, systemPrompt: "" })
     setUseCustomPrompt(false)
+    triggerAutoSave({ ...settings, systemPrompt: "", providers: settings.providers })
   }
+
+  useEffect(() => {
+    setSaved(autoSaveStatus === "saved")
+  }, [autoSaveStatus])
 
   const handleToggleRegistrar = (id: string) => {
     const registrars = (settings.registrars || DEFAULT_REGISTRARS).map((r) =>
       r.id === id ? { ...r, enabled: !r.enabled } : r,
     )
-    setSettings({ ...settings, registrars })
+    const next = { ...settings, registrars }
+    setSettings(next)
+    triggerAutoSave(next)
   }
 
   const handleAddRegistrar = () => {
@@ -132,28 +132,36 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
       enabled: true,
     }
 
-    setSettings({
+    const next = {
       ...settings,
       registrars: [...(settings.registrars || DEFAULT_REGISTRARS), registrar],
-    })
+    }
+    setSettings(next)
+    triggerAutoSave(next)
     setNewRegistrar({ name: "", url: "" })
     setShowAddForm(false)
   }
 
   const handleDeleteRegistrar = (id: string) => {
     const registrars = (settings.registrars || DEFAULT_REGISTRARS).filter((r) => r.id !== id)
-    setSettings({ ...settings, registrars })
+    const next = { ...settings, registrars }
+    setSettings(next)
+    triggerAutoSave(next)
   }
 
   const handleResetRegistrars = () => {
-    setSettings({ ...settings, registrars: DEFAULT_REGISTRARS })
+    const next = { ...settings, registrars: DEFAULT_REGISTRARS }
+    setSettings(next)
+    triggerAutoSave(next)
   }
 
   const handleProviderChange = (providerId: string) => {
     // Save current changes first to local state list (not storage yet)
     if (activeProvider) {
       const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
-      setSettings((prev) => ({ ...prev, providers: updatedProviders }))
+      const next = { ...settings, providers: updatedProviders }
+      setSettings(next)
+      triggerAutoSave(next)
     }
 
     const nextProvider = settings.providers?.find((p) => p.id === providerId)
@@ -166,7 +174,9 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
     // Save current
     if (activeProvider) {
       const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
-      setSettings((prev) => ({ ...prev, providers: updatedProviders }))
+      const next = { ...settings, providers: updatedProviders }
+      setSettings(next)
+      triggerAutoSave(next)
     }
 
     const newProvider: AIProvider = {
@@ -177,10 +187,12 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
       model: "gpt-4o-mini",
     }
 
-    setSettings((prev) => ({
-      ...prev,
-      providers: [...(prev.providers || []), newProvider],
-    }))
+    const next = {
+      ...settings,
+      providers: [...(settings.providers || []), newProvider],
+    }
+    setSettings(next)
+    triggerAutoSave(next)
     setActiveProvider(newProvider)
   }
 
@@ -208,8 +220,7 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
         apiEndpoint: nextActive.endpoint,
         model: nextActive.model,
       }
-      saveSettings(newSettings)
-      onSettingsChange?.(newSettings)
+      triggerAutoSave(newSettings)
     }
   }
 
@@ -380,7 +391,20 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
                     type={showKey ? "text" : "password"}
                     placeholder="sk-..."
                     value={activeProvider.apiKey}
-                    onChange={(e) => setActiveProvider({ ...activeProvider, apiKey: e.target.value })}
+                    onChange={(e) => {
+                      const nextProvider = { ...activeProvider, apiKey: e.target.value }
+                      setActiveProvider(nextProvider)
+                      const updatedProviders = (settings.providers || []).map((p) =>
+                        p.id === nextProvider.id ? nextProvider : p,
+                      )
+                      const nextSettings = {
+                        ...settings,
+                        providers: updatedProviders,
+                        apiKey: nextProvider.apiKey,
+                      }
+                      setSettings(nextSettings)
+                      triggerAutoSave(nextSettings)
+                    }}
                     className="font-mono text-sm"
                   />
                   <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>
@@ -402,14 +426,27 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
 
               <div className="space-y-2">
                 <Label htmlFor="endpoint">{t("settings.apiEndpoint")}</Label>
-                <Input
-                  id="endpoint"
-                  type="text"
-                  placeholder="https://api.openai.com/v1"
-                  value={activeProvider.endpoint}
-                  onChange={(e) => setActiveProvider({ ...activeProvider, endpoint: e.target.value })}
-                  className="font-mono text-sm"
-                />
+                  <Input
+                    id="endpoint"
+                    type="text"
+                    placeholder="https://api.openai.com/v1"
+                    value={activeProvider.endpoint}
+                    onChange={(e) => {
+                      const nextProvider = { ...activeProvider, endpoint: e.target.value }
+                      setActiveProvider(nextProvider)
+                      const updatedProviders = (settings.providers || []).map((p) =>
+                        p.id === nextProvider.id ? nextProvider : p,
+                      )
+                      const nextSettings = {
+                        ...settings,
+                        providers: updatedProviders,
+                        apiEndpoint: nextProvider.endpoint,
+                      }
+                      setSettings(nextSettings)
+                      triggerAutoSave(nextSettings)
+                    }}
+                    className="font-mono text-sm"
+                  />
                 <p className="text-xs text-muted-foreground">{t("settings.apiEndpointDesc")}</p>
               </div>
 
@@ -417,8 +454,21 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
                 <Label htmlFor="model">{t("settings.model")}</Label>
                 <Select
                   value={activeProvider.model}
-                  onValueChange={(value) => setActiveProvider({ ...activeProvider, model: value })}
-                >
+                  onValueChange={(value) => {
+                    const nextProvider = { ...activeProvider, model: value }
+                      setActiveProvider(nextProvider)
+                      const updatedProviders = (settings.providers || []).map((p) =>
+                        p.id === nextProvider.id ? nextProvider : p,
+                      )
+                      const nextSettings = {
+                        ...settings,
+                        providers: updatedProviders,
+                        model: nextProvider.model,
+                      }
+                      setSettings(nextSettings)
+                      triggerAutoSave(nextSettings)
+                    }}
+                  >
                   <SelectTrigger>
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
@@ -428,10 +478,34 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
                         {model.label}
                       </SelectItem>
                     ))}
-                    {/* Add option for custom model text input if needed, but for now fixed list */}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">{t("settings.modelDesc")}</p>
+                <div className="space-y-1 mt-2">
+                  <Label htmlFor="customModel" className="text-xs text-muted-foreground">
+                    {t("settings.customModelLabel")}
+                  </Label>
+                  <Input
+                    id="customModel"
+                    placeholder="custom-model-name"
+                    value={activeProvider.model}
+                    onChange={(e) => {
+                      const nextProvider = { ...activeProvider, model: e.target.value }
+                      setActiveProvider(nextProvider)
+                      const updatedProviders = (settings.providers || []).map((p) =>
+                        p.id === nextProvider.id ? nextProvider : p,
+                      )
+                      const nextSettings = {
+                        ...settings,
+                        providers: updatedProviders,
+                        model: nextProvider.model,
+                      }
+                      setSettings(nextSettings)
+                      triggerAutoSave(nextSettings)
+                    }}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">{t("settings.modelDesc")}</p>
+                </div>
               </div>
             </section>
           )}
@@ -477,13 +551,17 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
 
               {useCustomPrompt && (
                 <>
-                  <Textarea
-                    id="systemPrompt"
-                    placeholder={defaultPrompt}
-                    value={settings.systemPrompt}
-                    onChange={(e) => setSettings({ ...settings, systemPrompt: e.target.value })}
-                    className="font-mono text-sm min-h-[150px] resize-y"
-                  />
+              <Textarea
+                id="systemPrompt"
+                placeholder={defaultPrompt}
+                value={settings.systemPrompt}
+                onChange={(e) => {
+                  const next = { ...settings, systemPrompt: e.target.value }
+                  setSettings(next)
+                  triggerAutoSave(next)
+                }}
+                className="font-mono text-sm min-h-[150px] resize-y"
+              />
                   <p className="text-xs text-muted-foreground">{t("settings.customInstructionsDesc")}</p>
                 </>
               )}

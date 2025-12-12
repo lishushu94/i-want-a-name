@@ -67,6 +67,7 @@ export const zh: Translations = {
     apiEndpointDesc: "使用自定义端点以支持 OpenAI 兼容 API",
     model: "模型",
     modelDesc: "选择用于生成域名建议的 AI 模型",
+    customModelLabel: "或输入自定义模型名称",
     systemPrompt: "系统提示词",
     customInstructions: "自定义指令",
     customInstructionsDesc: "自定义 AI 的行为。关闭后将使用默认提示词。",

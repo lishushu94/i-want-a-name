@@ -65,6 +65,7 @@ export const en = {
     apiEndpointDesc: "Use custom endpoint for OpenAI-compatible APIs",
     model: "Model",
     modelDesc: "Choose the AI model for generating domain suggestions",
+    customModelLabel: "Or type a custom model name",
     systemPrompt: "System Prompt",
     customInstructions: "Custom Instructions",
     customInstructionsDesc: "Customize the AI's behavior. Leave empty to use the default prompt.",
