@@ -1,6 +1,8 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
+import { I18nProvider } from "@/lib/i18n-context"
+import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
@@ -9,7 +11,12 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "i want a name - AI Domain Name Finder",
   description: "Find the perfect domain name for your startup with AI assistance",
-    generator: 'v0.app'
+  generator: "v0.app",
+  icons: [
+    { rel: "icon", url: "/icon.svg" },
+    { rel: "shortcut icon", url: "/icon.svg" },
+    { rel: "apple-touch-icon", url: "/icon.svg" },
+  ],
 }
 
 export default function RootLayout({
@@ -18,8 +25,17 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className="font-sans antialiased">{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body className="font-sans antialiased">
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem={true}
+          disableTransitionOnChange={false}
+        >
+          <I18nProvider>{children}</I18nProvider>
+        </ThemeProvider>
+      </body>
     </html>
   )
 }

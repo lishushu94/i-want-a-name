@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import type { Message, Conversation, DomainResult, Settings } from "@/lib/types"
+import type { Message, Conversation, DomainResult, Settings, ToolCall } from "@/lib/types"
 import {
   getSettings,
   getConversations,
@@ -13,19 +13,34 @@ import {
   setCurrentConversationId,
   updateConversationTitle,
 } from "@/lib/storage"
-import { streamChat, extractDomains, summarizeConversationTitle } from "@/lib/ai-service"
+import {
+  streamChat,
+  extractDomains,
+  extractDomainsFromToolCalls,
+  extractDomainsUnified,
+  summarizeConversationTitle,
+} from "@/lib/ai-service"
 import { createWhoisService } from "@/lib/whois-service"
 import { ChatMessage } from "./chat-message"
 import { SettingsPanel } from "./settings-panel"
 import { Sidebar } from "./sidebar"
 import { WelcomeScreen } from "./welcome-screen"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Loader2, Bot, ArrowLeft } from "lucide-react"
+import { Send, Loader2, Bot, ArrowLeft, Languages, Check } from "lucide-react"
+import { useI18n } from "@/lib/i18n-context"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 type ViewType = "home" | "chat" | "settings"
 
 export function ChatInterface() {
+  const { t, language, setLanguage } = useI18n()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -33,11 +48,13 @@ export function ChatInterface() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentConversationId, setCurrentConvId] = useState<string | null>(null)
   const [viewType, setViewType] = useState<ViewType>("home")
+  const [mounted, setMounted] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const whoisService = useRef(createWhoisService())
 
   useEffect(() => {
+    setMounted(true)
     const loadedSettings = getSettings()
     setSettings(loadedSettings)
 
@@ -66,6 +83,11 @@ export function ChatInterface() {
 
   const recheckDomainsOnLoad = async (msgs: Message[]) => {
     for (const message of msgs) {
+      // If we already have completed availability results, skip recheck
+      if (message.domains && message.domains.length > 0 && message.domains.every((d) => d.available !== null)) {
+        continue
+      }
+      // Priority 1: Use existing domains field
       if (message.domains && message.domains.length > 0) {
         const domainsToCheck = message.domains.filter((d) => d.available === null && !d.checking)
         if (domainsToCheck.length > 0) {
@@ -73,6 +95,20 @@ export function ChatInterface() {
             message.id,
             domainsToCheck.map((d) => ({ domain: d.domain, description: d.description })),
           )
+        }
+      }
+      // Priority 2: Extract from tool_calls if no domains field
+      else if (message.tool_calls) {
+        const extractedDomains = extractDomainsFromToolCalls(message.tool_calls)
+        if (extractedDomains.length > 0) {
+          checkDomainsForMessage(message.id, extractedDomains)
+        }
+      }
+      // Priority 3: Fallback to text extraction (old conversations)
+      else if (message.role === "assistant") {
+        const extractedDomains = extractDomains(message.content)
+        if (extractedDomains.length > 0) {
+          checkDomainsForMessage(message.id, extractedDomains)
         }
       }
     }
@@ -95,12 +131,13 @@ export function ChatInterface() {
   )
 
   const checkDomainsForMessage = useCallback(
-    async (messageId: string, domainList: { domain: string; description?: string }[]) => {
-      const initialResults: DomainResult[] = domainList.map((d) => ({
+    async (messageId: string, domainList: { domain: string; description?: string }[], onComplete?: () => void) => {
+      const initialResults: DomainResult[] = domainList.map((d, index) => ({
         domain: d.domain,
         description: d.description,
         available: null,
         checking: true,
+        order: index,
       }))
 
       setMessages((prev) => {
@@ -114,7 +151,9 @@ export function ChatInterface() {
           const updated = prev.map((m) => {
             if (m.id !== messageId) return m
             const updatedDomains = (m.domains || []).map((d) =>
-              d.domain === item.domain ? { ...result, description: d.description } : d,
+              d.domain === item.domain
+                ? { ...d, ...result, description: d.description, checkedAt: Date.now(), checking: false }
+                : d,
             )
             return { ...m, domains: updatedDomains }
           })
@@ -123,6 +162,7 @@ export function ChatInterface() {
         })
         await new Promise((r) => setTimeout(r, 300))
       }
+      onComplete?.()
     },
     [persistMessagesWithDomains],
   )
@@ -134,11 +174,24 @@ export function ChatInterface() {
       const id = currentConversationId || crypto.randomUUID()
       const title = msgs[0]?.content.slice(0, 50) || "New Conversation"
 
-      if (isNewConversation && msgs.length >= 2) {
+      // Merge in any domains/tool_calls from current state to persist availability cache
+      const mergedMessages = msgs.map((m) => {
+        const existing = messages.find((x) => x.id === m.id)
+        if (existing) {
+          return {
+            ...m,
+            tool_calls: existing.tool_calls ?? m.tool_calls,
+            domains: existing.domains ?? m.domains,
+          }
+        }
+        return m
+      })
+
+      if (isNewConversation && mergedMessages.length >= 2) {
         const conversation: Conversation = {
           id,
-          title: title + (msgs[0]?.content.length > 50 ? "..." : ""),
-          messages: msgs,
+          title: title + (mergedMessages[0]?.content.length > 50 ? "..." : ""),
+          messages: mergedMessages,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }
@@ -147,7 +200,7 @@ export function ChatInterface() {
         setCurrentConvId(id)
         setConversations(getConversations())
 
-        summarizeConversationTitle(msgs[0]?.content || "", settings).then((summary) => {
+        summarizeConversationTitle(mergedMessages[0]?.content || "", settings).then((summary) => {
           const updatedConv: Conversation = {
             ...conversation,
             title: summary,
@@ -161,7 +214,7 @@ export function ChatInterface() {
         const conversation: Conversation = {
           id,
           title: existingConv?.title || title,
-          messages: msgs,
+          messages: mergedMessages,
           createdAt: existingConv?.createdAt || Date.now(),
           updatedAt: Date.now(),
         }
@@ -171,7 +224,7 @@ export function ChatInterface() {
         setConversations(getConversations())
       }
     },
-    [currentConversationId, settings, conversations],
+    [currentConversationId, settings, conversations, messages],
   )
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -179,6 +232,11 @@ export function ChatInterface() {
     if (!input.trim() || isLoading || !settings) return
 
     const isNewConversation = messages.length === 0
+    const conversationId = currentConversationId || crypto.randomUUID()
+    if (!currentConversationId) {
+      setCurrentConvId(conversationId)
+      setCurrentConversationId(conversationId)
+    }
     setViewType("chat")
 
     const userMessage: Message = {
@@ -201,33 +259,80 @@ export function ChatInterface() {
       timestamp: Date.now(),
     }
 
+    // Ensure an assistant message exists in state so tool-call-only responses can still be rendered/updated
+    const ensureAssistantMessage = (content?: string, toolCalls?: ToolCall[]) => {
+      setMessages((prev) => {
+        const index = prev.findIndex((m) => m.id === assistantMessageId)
+        if (index === -1) {
+          return [
+            ...prev,
+            {
+              ...assistantMessage,
+              content: content ?? "",
+              tool_calls: toolCalls?.length ? toolCalls : undefined,
+            },
+          ]
+        }
+
+        const updated = [...prev]
+        updated[index] = {
+          ...updated[index],
+          content: content ?? updated[index].content,
+          tool_calls: toolCalls?.length ? toolCalls : updated[index].tool_calls,
+        }
+        return updated
+      })
+    }
+
     let fullContent = ""
+    let accumulatedToolCalls: ToolCall[] = []
 
     await streamChat(
       newMessages,
       settings,
+      // onChunk callback
       (chunk) => {
         fullContent += chunk
-        setMessages((prev) => {
-          const updated = [...prev]
-          const lastIndex = updated.length - 1
-          if (updated[lastIndex]?.role === "assistant") {
-            updated[lastIndex] = { ...updated[lastIndex], content: fullContent }
-          } else {
-            updated.push({ ...assistantMessage, content: fullContent })
-          }
-          return updated
-        })
+        ensureAssistantMessage(fullContent, accumulatedToolCalls)
       },
-      () => {
-        setIsLoading(false)
-        const extractedDomains = extractDomains(fullContent)
+      // onToolCall callback (new)
+      (toolCalls) => {
+        accumulatedToolCalls = toolCalls
+
+        // Ensure assistant message exists even if there's no text delta
+        ensureAssistantMessage(fullContent, accumulatedToolCalls)
+
+        // Immediately extract domains and start checking (improves UX)
+        const extractedDomains = extractDomainsFromToolCalls(toolCalls)
         if (extractedDomains.length > 0) {
           checkDomainsForMessage(assistantMessageId, extractedDomains)
         }
-        const finalMessages = [...newMessages, { ...assistantMessage, content: fullContent }]
+      },
+      // onComplete callback
+      () => {
+        setIsLoading(false)
+
+        // Make sure assistant message is present even if no text chunks were streamed
+        ensureAssistantMessage(fullContent, accumulatedToolCalls)
+
+        // Unified extraction (compatible with both new and old approaches)
+        const extractedDomains = extractDomainsUnified(fullContent, accumulatedToolCalls)
+
+        // If not checked before, check now (for text-based extraction)
+        if (extractedDomains.length > 0 && accumulatedToolCalls.length === 0) {
+          checkDomainsForMessage(assistantMessageId, extractedDomains)
+        }
+
+        // Save message (including tool_calls)
+        const finalMessage: Message = {
+          ...assistantMessage,
+          content: fullContent,
+          tool_calls: accumulatedToolCalls.length > 0 ? accumulatedToolCalls : undefined,
+        }
+        const finalMessages = [...newMessages, finalMessage]
         saveCurrentConversation(finalMessages, isNewConversation)
       },
+      // onError callback
       (error) => {
         setIsLoading(false)
         setMessages((prev) => [
@@ -279,6 +384,8 @@ export function ChatInterface() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Avoid submitting while IME composition is active (e.g., macOS Chinese input)
+    if (e.nativeEvent.isComposing) return
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSubmit(e)
@@ -293,8 +400,41 @@ export function ChatInterface() {
     setSettings(newSettings)
   }
 
+  const handleConversationsChange = (updated: Conversation[]) => {
+    setConversations(updated)
+  }
+
+  const handleRefreshDomains = (messageId: string) => {
+    const target = messages.find((m) => m.id === messageId)
+    if (!target || !target.domains || target.domains.length === 0) return
+    const domainList = target.domains.map((d) => ({ domain: d.domain, description: d.description }))
+    checkDomainsForMessage(messageId, domainList)
+  }
+
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="flex h-screen bg-background overflow-hidden relative">
+      {mounted && (
+        <div className="absolute top-3 right-4 z-20 flex items-center gap-3">
+          <ThemeToggle />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="h-9 w-9 rounded-full">
+                <Languages className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem onClick={() => setLanguage("en")} className="justify-between">
+                English
+                {language === "en" && <Check className="h-4 w-4 text-emerald-500" />}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setLanguage("zh")} className="justify-between">
+                中文
+                {language === "zh" && <Check className="h-4 w-4 text-emerald-500" />}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       <Sidebar
         conversations={conversations}
         currentId={currentConversationId}
@@ -308,17 +448,17 @@ export function ChatInterface() {
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         {viewType === "settings" ? (
-          <SettingsPanel onSettingsChange={handleSettingsChange} />
+          <SettingsPanel onSettingsChange={handleSettingsChange} onConversationsChange={handleConversationsChange} />
         ) : viewType === "home" ? (
           <>
-            <header className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
-              <span className="text-sm text-muted-foreground">Home</span>
+            <header className="flex items-center justify-between px-6 py-4 shrink-0">
+              <span className="text-sm text-muted-foreground">i want a name</span>
             </header>
             <WelcomeScreen input={input} setInput={setInput} onSubmit={handleSubmit} isLoading={isLoading} />
           </>
         ) : (
           <>
-            <header className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
+            <header className="flex items-center justify-between px-6 py-4 shrink-0">
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleBackToHome}>
                   <ArrowLeft className="h-4 w-4" />
@@ -326,7 +466,7 @@ export function ChatInterface() {
                 <span className="text-sm text-muted-foreground">
                   {currentConversationId
                     ? conversations.find((c) => c.id === currentConversationId)?.title || "Chat"
-                    : "New Chat"}
+                    : t("common.newChat")}
                 </span>
               </div>
             </header>
@@ -334,7 +474,7 @@ export function ChatInterface() {
             <div className="flex-1 overflow-y-auto p-4 min-h-0">
               <div className="max-w-3xl mx-auto">
                 {messages.map((message) => (
-                  <ChatMessage key={message.id} message={message} />
+                  <ChatMessage key={message.id} message={message} onRefreshDomains={handleRefreshDomains} />
                 ))}
                 {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
                   <div className="flex items-center gap-3 py-4">
@@ -343,7 +483,7 @@ export function ChatInterface() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Thinking...</span>
+                      <span className="text-sm text-muted-foreground">{t("chat.thinking")}</span>
                     </div>
                   </div>
                 )}
@@ -351,21 +491,21 @@ export function ChatInterface() {
               </div>
             </div>
 
-            <div className="p-4 border-t border-border/50 bg-background shrink-0">
+            <div className="p-4 border-t border-border/20 bg-background shrink-0">
               <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
                 <div className="flex gap-2 items-end">
                   <Textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Ask for more suggestions or refine your requirements..."
+                    placeholder={t("chat.inputPlaceholder")}
                     className="min-h-[52px] max-h-32 resize-none rounded-xl"
                     disabled={isLoading}
                   />
                   <Button
                     type="submit"
                     size="icon"
-                    className="h-[52px] w-[52px] rounded-xl shrink-0"
+                    className="h-[52px] w-[52px] rounded-full shrink-0 bg-primary hover:bg-primary/90 shadow-lg"
                     disabled={isLoading || !input.trim()}
                   >
                     {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}

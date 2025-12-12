@@ -4,9 +4,25 @@ import type { Conversation } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { MessageSquare, Trash2, Plus, Globe, ChevronLeft, ChevronRight, Settings, Pencil, Check, X } from "lucide-react"
+import {
+  MessageSquare,
+  Trash2,
+  Plus,
+  Settings,
+  Pencil,
+  Check,
+  X,
+  MoreHorizontal,
+  Menu,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { useI18n } from "@/lib/i18n-context"
 
 interface SidebarProps {
   conversations: Conversation[]
@@ -39,20 +56,20 @@ export function Sidebar({
   onSettingsClick,
   onUpdateTitle,
 }: SidebarProps) {
+  const { t } = useI18n()
   const [collapsed, setCollapsed] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
   const formatDate = (timestamp: number) => {
     const date = new Date(timestamp)
     const now = new Date()
     const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
 
-    if (diffDays === 0) return "Today"
-    if (diffDays === 1) return "Yesterday"
-    if (diffDays < 7) return `${diffDays}d ago`
+    if (diffDays === 0) return t("common.today")
+    if (diffDays === 1) return t("common.yesterday")
+    if (diffDays < 7) return `${diffDays} ${t("common.daysAgo")}`
     return date.toLocaleDateString()
   }
 
@@ -60,26 +77,19 @@ export function Sidebar({
     <>
       <div
         className={cn(
-          "h-screen border-r border-border/50 bg-muted/30 flex flex-col shrink-0 overflow-hidden",
+          "h-screen bg-muted/30 border-r border-border/40 flex flex-col shrink-0 overflow-hidden transition-all duration-300",
           collapsed ? "w-16" : "w-72",
         )}
       >
-        {/* Logo */}
-        <div className="p-4 border-b border-border/50 flex items-center justify-between shrink-0">
-          {!collapsed && (
-            <div className="flex items-center gap-2">
-              <Globe className="h-5 w-5 text-primary" />
-              <span className="font-semibold">i want a name</span>
-            </div>
-          )}
-          {collapsed && <Globe className="h-5 w-5 text-primary mx-auto" />}
+        {/* Hamburger Menu */}
+        <div className="p-3 shrink-0">
           <Button
             variant="ghost"
             size="icon"
-            className={cn("h-7 w-7 shrink-0", collapsed && "mx-auto mt-2")}
+            className="h-10 w-10"
             onClick={() => setCollapsed(!collapsed)}
           >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            <Menu className="h-5 w-5" />
           </Button>
         </div>
 
@@ -87,34 +97,29 @@ export function Sidebar({
         <div className="p-3 shrink-0">
           <Button
             onClick={onNew}
-            variant="outline"
-            className={cn("w-full justify-start gap-2", collapsed && "justify-center px-2")}
+            variant="ghost"
+            size="icon"
+            className={cn("h-10 w-10", !collapsed && "w-full justify-start gap-2")}
           >
-            <Plus className="h-4 w-4" />
-            {!collapsed && <span>New Chat</span>}
+            <Plus className="h-5 w-5 shrink-0" />
+            {!collapsed && <span>{t("common.newChat")}</span>}
           </Button>
         </div>
 
         {/* Conversations List */}
-        <ScrollArea className="flex-1 px-3">
-          <div className="space-y-1 pb-4">
-            {conversations.map((conv) => (
-              <div
-                key={conv.id}
-                className={cn(
-                  "relative flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors",
-                  currentId === conv.id && !showSettings ? "bg-primary/10 text-primary" : "hover:bg-muted",
-                  collapsed && "justify-center",
-                )}
-                onClick={() => !editingId && onSelect(conv)}
-                onMouseEnter={() => setHoveredId(conv.id)}
-                onMouseLeave={() => setHoveredId(null)}
-                title={collapsed ? conv.title : undefined}
-              >
-                <MessageSquare className="h-4 w-4 shrink-0" />
-                {!collapsed && (
-                  <>
-                    {editingId === conv.id ? (
+        {!collapsed && (
+          <ScrollArea className="flex-1 px-3">
+            <div className="space-y-1 pb-4">
+              {conversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  className={cn(
+                    "relative flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors group",
+                    currentId === conv.id && !showSettings ? "bg-primary/10 text-primary" : "hover:bg-muted",
+                  )}
+                  onClick={() => !editingId && onSelect(conv)}
+                >
+                  {editingId === conv.id ? (
                       <div className="flex-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <Input
                           value={editingTitle}
@@ -166,58 +171,66 @@ export function Sidebar({
                       </div>
                     ) : (
                       <>
-                        <div className="flex-1 min-w-0 pr-14">
-                          <p className="text-sm truncate">{conv.title || "New Conversation"}</p>
+                        <div className="flex-1 min-w-0 pr-8">
+                          <p className="text-sm truncate">{conv.title || t("common.newChat")}</p>
                           <p className="text-xs text-muted-foreground">{formatDate(conv.updatedAt)}</p>
                         </div>
-                        <div
-                          className={cn(
-                            "absolute right-2 top-1/2 -translate-y-1/2 flex gap-0.5 transition-opacity bg-inherit",
-                            hoveredId === conv.id ? "opacity-100" : "opacity-0 pointer-events-none",
-                          )}
-                        >
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 bg-muted hover:bg-muted-foreground/20"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setEditingId(conv.id)
-                              setEditingTitle(conv.title)
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 bg-muted hover:bg-destructive/20 hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setDeleteConfirmId(conv.id)
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              >
+                                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e: React.MouseEvent) => {
+                                  e.stopPropagation()
+                                  setEditingId(conv.id)
+                                  setEditingTitle(conv.title)
+                                }}
+                              >
+                                <Pencil className="mr-2 h-4 w-4" />
+                                {t("common.rename")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={(e: React.MouseEvent) => {
+                                  e.stopPropagation()
+                                  setDeleteConfirmId(conv.id)
+                                }}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                {t("common.delete")}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </>
                     )}
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        )}
+
+        {/* Spacer for collapsed state */}
+        {collapsed && <div className="flex-1" />}
 
         {/* Settings Button */}
-        <div className="p-3 border-t border-border/50 shrink-0">
+        <div className="p-3 border-t border-border/30 shrink-0">
           <Button
             onClick={onSettingsClick}
             variant={showSettings ? "secondary" : "ghost"}
             className={cn("w-full justify-start gap-2", collapsed && "justify-center px-2")}
           >
             <Settings className="h-4 w-4" />
-            {!collapsed && <span>Settings</span>}
+            {!collapsed && <span>{t("common.settings")}</span>}
           </Button>
         </div>
       </div>
@@ -226,13 +239,11 @@ export function Sidebar({
       <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Conversation</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this conversation? This action cannot be undone.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t("sidebar.deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("sidebar.deleteDesc")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (deleteConfirmId) {
@@ -242,7 +253,7 @@ export function Sidebar({
               }}
               className="bg-destructive hover:bg-destructive/90"
             >
-              Delete
+              {t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

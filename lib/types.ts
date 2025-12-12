@@ -1,9 +1,26 @@
+// Tool call structure for OpenAI function calling
+export interface ToolCall {
+  id: string
+  type: "function"
+  function: {
+    name: string
+    arguments: string // JSON string
+  }
+}
+
+// Domain recommendation structure (used in function calling)
+export interface DomainRecommendation {
+  domain: string
+  description: string
+}
+
 export interface Message {
   id: string
   role: "user" | "assistant"
   content: string
   timestamp: number
   domains?: DomainResult[]
+  tool_calls?: ToolCall[] // Store original tool_calls from function calling
 }
 
 export interface Conversation {
@@ -12,6 +29,8 @@ export interface Conversation {
   messages: Message[]
   createdAt: number
   updatedAt: number
+  importedFromId?: string
+  importedAt?: number
 }
 
 export interface DomainResult {
@@ -22,6 +41,8 @@ export interface DomainResult {
   expiryDate?: string
   error?: string
   description?: string
+  order?: number // Preserve original suggested order
+  checkedAt?: number
 }
 
 export interface Registrar {
@@ -31,13 +52,41 @@ export interface Registrar {
   enabled: boolean
 }
 
-export interface Settings {
+export interface AIProvider {
+  id: string
+  name: string
   apiKey: string
-  apiEndpoint: string
+  endpoint: string
   model: string
+}
+
+export interface Settings {
+  // New fields for multi-provider support
+  providers?: AIProvider[]
+  activeProviderId?: string
+
+  // Legacy fields (kept for backward compatibility during migration)
+  apiKey?: string
+  apiEndpoint?: string
+  model?: string
+
   systemPrompt?: string
   registrars?: Registrar[] // Add registrars to settings
+  enableFunctionCalling?: boolean // Enable/disable function calling feature
 }
+
+export interface ConversationExportPayload {
+  version: string
+  exportedAt: string
+  app?: {
+    name?: string
+    version?: string
+    environment?: string
+  }
+  conversations: Conversation[]
+}
+
+export type ConversationImportStrategy = "new" | "overwrite"
 
 // WHOIS service abstraction for future backend integration
 export interface WhoisService {
@@ -62,3 +111,38 @@ export const DEFAULT_REGISTRARS: Registrar[] = [
   { id: "porkbun", name: "Porkbun", url: "https://porkbun.com/checkout/search?q=", enabled: false },
   { id: "dynadot", name: "Dynadot", url: "https://www.dynadot.com/domain/search?domain=", enabled: false },
 ]
+
+// OpenAI function calling tool definition for domain recommendation
+export const RECOMMEND_DOMAINS_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "recommend_domains",
+    description: "推荐域名给用户。当用户需要域名建议时使用此工具返回5-8个域名。",
+    parameters: {
+      type: "object",
+      properties: {
+        domains: {
+          type: "array",
+          description: "推荐的域名列表",
+          items: {
+            type: "object",
+            properties: {
+              domain: {
+                type: "string",
+                description: "域名，如'RecipeAI.com'",
+              },
+              description: {
+                type: "string",
+                description: "域名的含义和推荐理由",
+              },
+            },
+            required: ["domain", "description"],
+          },
+          minItems: 5,
+          maxItems: 8,
+        },
+      },
+      required: ["domains"],
+    },
+  },
+}

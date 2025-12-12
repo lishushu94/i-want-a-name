@@ -1,0 +1,27 @@
+# dependencies
+node_modules
+
+# builds
+.next
+out
+.turbo
+.vercel
+
+# env / secrets (none tracked, keep ignored)
+.env
+.env.*
+
+# logs / reports
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+audit-report.json
+
+# editor / os
+.DS_Store
+.idea
+*.swp
+*.swo
+*.orig

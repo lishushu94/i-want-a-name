@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Send, Sparkles, Search, Zap } from "lucide-react"
+import { useI18n } from "@/lib/i18n-context"
 import type React from "react"
 
 interface WelcomeScreenProps {
@@ -13,32 +14,36 @@ interface WelcomeScreenProps {
 }
 
 export function WelcomeScreen({ input, setInput, onSubmit, isLoading }: WelcomeScreenProps) {
+  const { t } = useI18n()
+
   const suggestions = [
-    "I'm building an AI-powered writing assistant",
-    "I need a domain for my food delivery startup",
-    "Looking for a catchy name for my SaaS product",
-    "Help me find a domain for my photography portfolio",
+    t("welcome.suggestion1"),
+    t("welcome.suggestion2"),
+    t("welcome.suggestion3"),
+    t("welcome.suggestion4"),
   ]
 
   const features = [
     {
       icon: Sparkles,
-      title: "AI-Powered Suggestions",
-      description: "Get creative domain ideas based on your business description",
+      title: t("features.title1"),
+      description: t("features.desc1"),
     },
     {
       icon: Search,
-      title: "Real-time Availability",
-      description: "Instantly check if domains are available for registration",
+      title: t("features.title2"),
+      description: t("features.desc2"),
     },
     {
       icon: Zap,
-      title: "Quick Registration",
-      description: "One-click links to popular domain registrars",
+      title: t("features.title3"),
+      description: t("features.desc3"),
     },
   ]
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Avoid submitting while IME composition is active (e.g., macOS Chinese input)
+    if ((e.nativeEvent as any).isComposing) return
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       onSubmit(e)
@@ -49,10 +54,8 @@ export function WelcomeScreen({ input, setInput, onSubmit, isLoading }: WelcomeS
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="max-w-2xl w-full text-center">
         {/* Hero */}
-        <h1 className="text-4xl font-bold mb-3">Find Your Perfect Domain</h1>
-        <p className="text-lg text-muted-foreground mb-8">
-          Describe your business, and let AI suggest the perfect domain names for you.
-        </p>
+        <h1 className="text-4xl font-bold mb-3">{t("welcome.title")}</h1>
+        <p className="text-lg text-muted-foreground mb-8">{t("welcome.subtitle")}</p>
 
         {/* Input */}
         <form onSubmit={onSubmit} className="mb-8">
@@ -61,7 +64,7 @@ export function WelcomeScreen({ input, setInput, onSubmit, isLoading }: WelcomeS
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Tell me about your business or project..."
+              placeholder={t("welcome.placeholder")}
               className="min-h-[120px] resize-none rounded-xl pr-14 text-base"
               disabled={isLoading}
             />
@@ -78,7 +81,7 @@ export function WelcomeScreen({ input, setInput, onSubmit, isLoading }: WelcomeS
 
         {/* Suggestions */}
         <div className="mb-12">
-          <p className="text-sm text-muted-foreground mb-3">Try one of these:</p>
+          <p className="text-sm text-muted-foreground mb-3">{t("welcome.tryOne")}</p>
           <div className="flex flex-wrap gap-2 justify-center">
             {suggestions.map((suggestion) => (
               <Button

@@ -1,56 +1,118 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import type { Settings, Registrar } from "@/lib/types"
+import type React from "react"
+import { useEffect, useRef, useState } from "react"
+import type { Settings, Registrar, AIProvider, Conversation } from "@/lib/types"
 import { DEFAULT_REGISTRARS } from "@/lib/types"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/ai-service"
-import { getSettings, saveSettings } from "@/lib/storage"
+import { DEFAULT_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT_WITH_TOOLS } from "@/lib/ai-service"
+import {
+  buildConversationExportPayload,
+  getConversations,
+  getSettings,
+  importConversationsFromPayload,
+  saveSettings,
+} from "@/lib/storage"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Eye, EyeOff, Save, Check, RotateCcw, Plus, Trash2 } from "lucide-react"
+import { Eye, EyeOff, Save, Check, RotateCcw, Plus, Trash2, Upload, Download, Copy } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useI18n } from "@/lib/i18n-context"
 
 interface SettingsPanelProps {
   onSettingsChange?: (settings: Settings) => void
+  onConversationsChange?: (conversations: Conversation[]) => void
 }
 
 const MODELS = [
-  { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-  { value: "gpt-4o", label: "GPT-4o" },
-  { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
-  { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+  { value: "gpt-5-chat", label: "gpt-5-chat" },
+  { value: "gpt-4o", label: "gpt-4o" },
+  { value: "gpt-4o-mini", label: "gpt-4o-mini" },
 ]
 
-export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
+export function SettingsPanel({ onSettingsChange, onConversationsChange }: SettingsPanelProps) {
+  const { t, language, setLanguage } = useI18n()
   const [settings, setSettings] = useState<Settings>({
     apiKey: "",
     apiEndpoint: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
     systemPrompt: "",
     registrars: DEFAULT_REGISTRARS,
+    providers: [],
+    activeProviderId: "",
   })
+
+  // Local state for the current editing provider
+  const [activeProvider, setActiveProvider] = useState<AIProvider | null>(null)
+
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [selectedConversationId, setSelectedConversationId] = useState<string>("all")
+  const [dataInfo, setDataInfo] = useState<string | null>(null)
+  const [dataError, setDataError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [useCustomPrompt, setUseCustomPrompt] = useState(false)
+  const [copiedDefaultPrompt, setCopiedDefaultPrompt] = useState(false)
+
   const [showKey, setShowKey] = useState(false)
   const [saved, setSaved] = useState(false)
   const [newRegistrar, setNewRegistrar] = useState({ name: "", url: "" })
   const [showAddForm, setShowAddForm] = useState(false)
 
   useEffect(() => {
-    setSettings(getSettings())
+    const loaded = getSettings()
+    setSettings(loaded)
+    setConversations(getConversations())
+    setUseCustomPrompt(Boolean(loaded.systemPrompt && loaded.systemPrompt.trim().length > 0))
+
+    // Set active provider
+    if (loaded.providers && loaded.providers.length > 0) {
+      const active = loaded.providers.find((p) => p.id === loaded.activeProviderId) || loaded.providers[0]
+      setActiveProvider(active)
+    } else {
+      // Init with default if empty (should be handled by migration but just in case)
+      const defaultProvider: AIProvider = {
+        id: "default",
+        name: "Default Provider",
+        apiKey: "",
+        endpoint: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      }
+      setActiveProvider(defaultProvider)
+      setSettings({ ...loaded, providers: [defaultProvider], activeProviderId: "default" })
+    }
   }, [])
 
   const handleSave = () => {
-    saveSettings(settings)
-    onSettingsChange?.(settings)
+    if (!activeProvider) return
+
+    // Update the provider in the list
+    const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
+
+    // Use legacy fields for backward compatibility with existing code that uses settings.apiKey directly
+    const newSettings: Settings = {
+      ...settings,
+      providers: updatedProviders,
+      activeProviderId: activeProvider.id,
+      // Sync legacy fields
+      apiKey: activeProvider.apiKey,
+      apiEndpoint: activeProvider.endpoint,
+      model: activeProvider.model,
+      systemPrompt: useCustomPrompt ? settings.systemPrompt : "",
+    }
+
+    saveSettings(newSettings)
+    setSettings(newSettings)
+    onSettingsChange?.(newSettings)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
 
   const handleResetPrompt = () => {
     setSettings({ ...settings, systemPrompt: "" })
+    setUseCustomPrompt(false)
   }
 
   const handleToggleRegistrar = (id: string) => {
@@ -87,116 +149,443 @@ export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
     setSettings({ ...settings, registrars: DEFAULT_REGISTRARS })
   }
 
+  const handleProviderChange = (providerId: string) => {
+    // Save current changes first to local state list (not storage yet)
+    if (activeProvider) {
+      const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
+      setSettings((prev) => ({ ...prev, providers: updatedProviders }))
+    }
+
+    const nextProvider = settings.providers?.find((p) => p.id === providerId)
+    if (nextProvider) {
+      setActiveProvider(nextProvider)
+    }
+  }
+
+  const handleAddProvider = () => {
+    // Save current
+    if (activeProvider) {
+      const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
+      setSettings((prev) => ({ ...prev, providers: updatedProviders }))
+    }
+
+    const newProvider: AIProvider = {
+      id: `provider-${Date.now()}`,
+      name: "New Provider",
+      apiKey: "",
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+    }
+
+    setSettings((prev) => ({
+      ...prev,
+      providers: [...(prev.providers || []), newProvider],
+    }))
+    setActiveProvider(newProvider)
+  }
+
+  const handleDeleteProvider = () => {
+    if (!activeProvider || (settings.providers?.length || 0) <= 1) return
+
+    if (confirm(t("settings.deleteProviderConfirm"))) {
+      const updatedProviders = settings.providers?.filter((p) => p.id !== activeProvider.id) || []
+      const nextActive = updatedProviders[0]
+
+      setSettings({
+        ...settings,
+        providers: updatedProviders,
+        activeProviderId: nextActive?.id,
+      })
+      setActiveProvider(nextActive)
+
+      // Trigger save to persist deletion immediately if desired, or let user click save
+      // For safety, let's auto-save on delete
+      const newSettings = {
+        ...settings,
+        providers: updatedProviders,
+        activeProviderId: nextActive.id,
+        apiKey: nextActive.apiKey,
+        apiEndpoint: nextActive.endpoint,
+        model: nextActive.model,
+      }
+      saveSettings(newSettings)
+      onSettingsChange?.(newSettings)
+    }
+  }
+
+  const refreshConversations = (next?: Conversation[]) => {
+    const updated = next ?? getConversations()
+    setConversations(updated)
+    if (selectedConversationId !== "all" && !updated.find((c) => c.id === selectedConversationId)) {
+      setSelectedConversationId("all")
+    }
+    onConversationsChange?.(updated)
+  }
+
+  const downloadJson = (payload: unknown, filename: string) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const formatFileName = (scope: string) => {
+    const now = new Date()
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(
+      now.getDate(),
+    ).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`
+    const cleanScope = scope.replace(/[^a-z0-9-_]+/gi, "-") || "conversation"
+    return `conversations-${cleanScope}-${stamp}-v1.json`
+  }
+
+  const handleExport = () => {
+    setDataError(null)
+    setDataInfo(null)
+
+    const targets =
+      selectedConversationId === "all"
+        ? conversations
+        : conversations.filter((conv) => conv.id === selectedConversationId)
+
+    if (!targets || targets.length === 0) {
+      setDataError(t("settings.exportEmpty"))
+      return
+    }
+
+    const payload = buildConversationExportPayload(targets, { environment: window.location.origin })
+    const nameSeed =
+      selectedConversationId === "all" ? "all" : targets[0]?.title || targets[0]?.id || "conversation"
+
+    downloadJson(payload, formatFileName(nameSeed.toLowerCase()))
+    setDataInfo(t("settings.exportSuccess"))
+  }
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setDataError(null)
+    setDataInfo(null)
+
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      const result = importConversationsFromPayload(parsed, "new")
+
+      if (result.imported === 0) {
+        setDataError(t("settings.importNoData"))
+      } else {
+        refreshConversations(result.conversations)
+        setSelectedConversationId("all")
+        setDataInfo(
+          `${t("settings.importSuccess")}: ${result.imported} ${t("settings.importConversationsLabel")} / ${result.messages} ${t("settings.importMessagesLabel")}`,
+        )
+      }
+    } catch (error) {
+      console.error("Failed to import conversations", error)
+      setDataError(t("settings.importError"))
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    }
+  }
+
+  const defaultPrompt =
+    settings.enableFunctionCalling === false ? DEFAULT_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT_WITH_TOOLS
+
+  const handleCopyDefaultPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(defaultPrompt)
+      setCopiedDefaultPrompt(true)
+      setTimeout(() => setCopiedDefaultPrompt(false), 2000)
+    } catch (error) {
+      console.error("Failed to copy default prompt", error)
+    }
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <header className="px-6 py-4 border-b border-border/50 shrink-0">
-        <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure your API settings. All data is stored locally in your browser.
-        </p>
+      <header className="px-6 py-4 shrink-0">
+        <div>
+          <h1 className="text-xl font-semibold">{t("settings.title")}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{t("settings.description")}</p>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-2xl space-y-8 pb-8">
-          {/* API Settings Section */}
+          {/* Provider Selection Section */}
           <section className="space-y-4">
-            <h2 className="text-lg font-medium border-b pb-2">API Configuration</h2>
-
-            <div className="space-y-2">
-              <Label htmlFor="apiKey">API Key</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="apiKey"
-                  type={showKey ? "text" : "password"}
-                  placeholder="sk-..."
-                  value={settings.apiKey}
-                  onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
-                  className="font-mono text-sm"
-                />
-                <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Get your API key from{" "}
-                <a
-                  href="https://platform.openai.com/api-keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
+            <h2 className="text-lg font-medium border-b pb-2">{t("settings.providers")}</h2>
+            <p className="text-sm text-muted-foreground">
+              {t("settings.providersNote")}
+            </p>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1 space-y-2">
+                <Label>{t("settings.selectProvider")}</Label>
+                <Select
+                  value={activeProvider?.id}
+                  onValueChange={(val) => handleProviderChange(val)}
+                  disabled={!settings.providers || settings.providers.length === 0}
                 >
-                  OpenAI Platform
-                </a>
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="endpoint">API Endpoint</Label>
-              <Input
-                id="endpoint"
-                type="text"
-                placeholder="https://api.openai.com/v1"
-                value={settings.apiEndpoint}
-                onChange={(e) => setSettings({ ...settings, apiEndpoint: e.target.value })}
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Use custom endpoint for OpenAI-compatible APIs (e.g., Azure OpenAI, local LLM)
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="model">Model</Label>
-              <Select value={settings.model} onValueChange={(value) => setSettings({ ...settings, model: value })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {MODELS.map((model) => (
-                    <SelectItem key={model.value} value={model.value}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Choose the AI model for generating domain suggestions</p>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(settings.providers || []).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={handleAddProvider} size="icon" variant="outline" title={t("settings.addProvider")}>
+                <Plus className="h-4 w-4" />
+              </Button>
+              <Button
+                onClick={handleDeleteProvider}
+                size="icon"
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                title={t("settings.deleteProvider")}
+                disabled={(settings.providers?.length || 0) <= 1}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </div>
           </section>
 
+          {/* API Settings Section */}
+          {activeProvider && (
+            <section className="space-y-4 p-4 border rounded-lg bg-muted/20">
+              <div className="space-y-2">
+                <Label htmlFor="providerName">{t("settings.providerName")}</Label>
+                <Input
+                  id="providerName"
+                  value={activeProvider.name}
+                  onChange={(e) => setActiveProvider({ ...activeProvider, name: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="apiKey">{t("settings.apiKey")}</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="apiKey"
+                    type={showKey ? "text" : "password"}
+                    placeholder="sk-..."
+                    value={activeProvider.apiKey}
+                    onChange={(e) => setActiveProvider({ ...activeProvider, apiKey: e.target.value })}
+                    className="font-mono text-sm"
+                  />
+                  <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>
+                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.apiKeyDesc")}{" "}
+                  <a
+                    href="https://platform.openai.com/api-keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    OpenAI Platform
+                  </a>
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="endpoint">{t("settings.apiEndpoint")}</Label>
+                <Input
+                  id="endpoint"
+                  type="text"
+                  placeholder="https://api.openai.com/v1"
+                  value={activeProvider.endpoint}
+                  onChange={(e) => setActiveProvider({ ...activeProvider, endpoint: e.target.value })}
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">{t("settings.apiEndpointDesc")}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="model">{t("settings.model")}</Label>
+                <Select
+                  value={activeProvider.model}
+                  onValueChange={(value) => setActiveProvider({ ...activeProvider, model: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODELS.map((model) => (
+                      <SelectItem key={model.value} value={model.value}>
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                    {/* Add option for custom model text input if needed, but for now fixed list */}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">{t("settings.modelDesc")}</p>
+              </div>
+            </section>
+          )}
+
           {/* System Prompt Section */}
           <section className="space-y-4">
-            <h2 className="text-lg font-medium border-b pb-2">System Prompt</h2>
+            <h2 className="text-lg font-medium border-b pb-2">{t("settings.systemPrompt")}</h2>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="use-custom-prompt"
+                    checked={useCustomPrompt}
+                    onCheckedChange={(checked) => {
+                      setUseCustomPrompt(checked)
+                      if (!checked) {
+                        setSettings({ ...settings, systemPrompt: "" })
+                      }
+                    }}
+                  />
+                  <Label htmlFor="use-custom-prompt" className="text-sm">
+                    {t("settings.useCustomPrompt")}
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetPrompt}
+                    disabled={!useCustomPrompt}
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    {t("settings.resetDefault")}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleCopyDefaultPrompt} className="h-7 text-xs">
+                    {copiedDefaultPrompt ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
+                    {t("settings.copyDefault")}
+                  </Button>
+                </div>
+              </div>
+
+              {useCustomPrompt && (
+                <>
+                  <Textarea
+                    id="systemPrompt"
+                    placeholder={defaultPrompt}
+                    value={settings.systemPrompt}
+                    onChange={(e) => setSettings({ ...settings, systemPrompt: e.target.value })}
+                    className="font-mono text-sm min-h-[150px] resize-y"
+                  />
+                  <p className="text-xs text-muted-foreground">{t("settings.customInstructionsDesc")}</p>
+                </>
+              )}
+
+              {!useCustomPrompt && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">{t("settings.defaultPromptDesc")}</p>
+                  <div className="p-3 border rounded-lg bg-muted/40">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{t("settings.defaultPromptTitle")}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {settings.enableFunctionCalling === false
+                            ? t("settings.defaultPromptText")
+                            : t("settings.defaultPromptTools")}
+                        </p>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={handleCopyDefaultPrompt} className="h-7 text-xs">
+                        {copiedDefaultPrompt ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
+                        {t("settings.copyDefault")}
+                      </Button>
+                    </div>
+                    <pre className="mt-2 text-xs whitespace-pre-wrap text-muted-foreground max-h-48 overflow-auto">
+                      {defaultPrompt}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Advanced Settings Section */}
+          <section className="space-y-4">
+            <h2 className="text-lg font-medium border-b pb-2">{t("settings.advanced")}</h2>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="enable-function-calling">Function Calling (实验性)</Label>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="enable-function-calling"
+                    checked={settings.enableFunctionCalling ?? true}
+                    onCheckedChange={(checked) => setSettings({ ...settings, enableFunctionCalling: checked })}
+                  />
+                  <span className="text-sm text-muted-foreground">使用结构化工具调用推荐域名</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  启用后将使用 OpenAI function calling（需要支持的模型），否则使用文本格式提取。推荐保持启用以获得更可靠的域名推荐。
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Data Export / Import Section */}
+          <section className="space-y-4">
+            <h2 className="text-lg font-medium border-b pb-2">{t("settings.dataTitle")}</h2>
+            <p className="text-sm text-muted-foreground">{t("settings.dataDesc")}</p>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="systemPrompt">Custom Instructions</Label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleResetPrompt}
-                  className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <RotateCcw className="h-3 w-3 mr-1" />
-                  Reset to default
-                </Button>
+              <Label>{t("settings.exportLabel")}</Label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Select value={selectedConversationId} onValueChange={(val) => setSelectedConversationId(val)}>
+                  <SelectTrigger className="sm:w-[260px]">
+                    <SelectValue placeholder={t("settings.selectConversation")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("settings.exportAllOption")}</SelectItem>
+                    {conversations.map((conv) => (
+                      <SelectItem key={conv.id} value={conv.id}>
+                        {conv.title || t("common.newChat")}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex gap-2">
+                  <Button onClick={handleExport} variant="secondary">
+                    <Upload className="h-4 w-4 mr-2" />
+                    {t("settings.exportButton")}
+                  </Button>
+                  <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                    <Download className="h-4 w-4 mr-2" />
+                    {t("settings.importButton")}
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/json"
+                    className="hidden"
+                    onChange={handleImportFile}
+                  />
+                </div>
               </div>
-              <Textarea
-                id="systemPrompt"
-                placeholder={DEFAULT_SYSTEM_PROMPT}
-                value={settings.systemPrompt}
-                onChange={(e) => setSettings({ ...settings, systemPrompt: e.target.value })}
-                className="font-mono text-sm min-h-[150px] resize-y"
-              />
-              <p className="text-xs text-muted-foreground">
-                Customize the AI&apos;s behavior. Leave empty to use the default prompt.
-              </p>
+              <p className="text-xs text-muted-foreground">{t("settings.dataHelper")}</p>
+              {dataInfo && <p className="text-xs text-emerald-600">{dataInfo}</p>}
+              {dataError && <p className="text-xs text-destructive">{dataError}</p>}
             </div>
           </section>
 
           {/* Domain Registrars Section */}
           <section className="space-y-4">
             <div className="flex items-center justify-between border-b pb-2">
-              <h2 className="text-lg font-medium">Domain Registrars</h2>
+              <h2 className="text-lg font-medium">{t("settings.registrars")}</h2>
               <Button
                 variant="ghost"
                 size="sm"
@@ -204,13 +593,11 @@ export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
                 className="h-7 text-xs text-muted-foreground hover:text-foreground"
               >
                 <RotateCcw className="h-3 w-3 mr-1" />
-                Reset to default
+                {t("settings.resetDefault")}
               </Button>
             </div>
 
-            <p className="text-sm text-muted-foreground">
-              Select which registrars to show when a domain is available. Enable the ones you prefer.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("settings.registrarsDesc")}</p>
 
             {/* Registrar List */}
             <div className="space-y-2">
@@ -249,7 +636,7 @@ export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
             {showAddForm ? (
               <div className="p-4 rounded-lg border border-dashed border-border space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="regName">Registrar Name</Label>
+                  <Label htmlFor="regName">{t("settings.registrarName")}</Label>
                   <Input
                     id="regName"
                     placeholder="e.g., MyRegistrar"
@@ -258,7 +645,7 @@ export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="regUrl">Registration URL</Label>
+                  <Label htmlFor="regUrl">{t("settings.registrarUrl")}</Label>
                   <Input
                     id="regUrl"
                     placeholder="e.g., https://example.com/search?domain="
@@ -266,15 +653,15 @@ export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
                     onChange={(e) => setNewRegistrar({ ...newRegistrar, url: e.target.value })}
                     className="font-mono text-sm"
                   />
-                  <p className="text-xs text-muted-foreground">The domain name will be appended to this URL</p>
+                  <p className="text-xs text-muted-foreground">{t("settings.registrarUrlDesc")}</p>
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleAddRegistrar} size="sm">
                     <Plus className="h-4 w-4 mr-1" />
-                    Add
+                    {t("settings.add")}
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => setShowAddForm(false)}>
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                 </div>
               </div>
@@ -285,7 +672,7 @@ export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
                 onClick={() => setShowAddForm(true)}
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Add Custom Registrar
+                {t("settings.addRegistrar")}
               </Button>
             )}
           </section>
@@ -295,12 +682,12 @@ export function SettingsPanel({ onSettingsChange }: SettingsPanelProps) {
             {saved ? (
               <>
                 <Check className="h-4 w-4 mr-2" />
-                Saved!
+                {t("common.saved")}
               </>
             ) : (
               <>
                 <Save className="h-4 w-4 mr-2" />
-                Save Settings
+                {t("common.save")}
               </>
             )}
           </Button>

@@ -10,9 +10,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/t
 
 interface ChatMessageProps {
   message: Message
+  onRefreshDomains?: (messageId: string) => void
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, onRefreshDomains }: ChatMessageProps) {
   const isUser = message.role === "user"
   const [copied, setCopied] = useState(false)
   const [copiedDomain, setCopiedDomain] = useState<string | null>(null)
@@ -102,7 +103,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
           )}
         </div>
 
-        {!isUser && message.domains && message.domains.length > 0 && <DomainCard domains={message.domains} />}
+        {!isUser && message.domains && message.domains.length > 0 && (
+          <DomainCard domains={message.domains} messageId={message.id} onRefresh={onRefreshDomains} />
+        )}
       </div>
     </div>
   )

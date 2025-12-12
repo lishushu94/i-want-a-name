@@ -6,15 +6,17 @@ import { DEFAULT_REGISTRARS } from "@/lib/types"
 import { getSettings } from "@/lib/storage"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Check, X, Loader2, ExternalLink } from "lucide-react"
+import { Check, X, Loader2, ExternalLink, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
 
 interface DomainCardProps {
   domains: DomainResult[]
+  messageId?: string
+  onRefresh?: (messageId: string) => void
 }
 
-export function DomainCard({ domains }: DomainCardProps) {
+export function DomainCard({ domains, messageId, onRefresh }: DomainCardProps) {
   const [registrars, setRegistrars] = useState<Registrar[]>([])
   const [copiedDomain, setCopiedDomain] = useState<string | null>(null)
 
@@ -32,56 +34,68 @@ export function DomainCard({ domains }: DomainCardProps) {
 
   if (domains.length === 0) return null
 
-  const availableDomains = domains.filter((d) => d.available === true)
-  const unavailableDomains = domains.filter((d) => d.available === false)
-  const checkingDomains = domains.filter((d) => d.checking)
+  const availableCount = domains.filter((d) => d.available === true).length
+  const unavailableCount = domains.filter((d) => d.available === false).length
+  const checkingCount = domains.filter((d) => d.checking).length
+  const lastChecked = domains.reduce<number | null>((acc, curr) => {
+    if (curr.checkedAt) {
+      return acc ? Math.min(acc, curr.checkedAt) : curr.checkedAt
+    }
+    return acc
+  }, null)
+
+  // Preserve original suggestion order; fallback to current index for older saved messages
+  const orderedDomains = [...domains]
+    .map((d, idx) => ({ ...d, order: d.order ?? idx }))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
   return (
     <TooltipProvider>
       <div className="mt-3 rounded-lg border border-border bg-card p-4 w-full">
         {/* Header with stats */}
         <div className="flex items-center justify-between mb-3 pb-2 border-b border-border/50">
-          <span className="text-sm font-medium text-muted-foreground">Domain Availability</span>
-          <div className="flex gap-2">
-            {availableDomains.length > 0 && (
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground">Domain Availability</span>
+            {lastChecked && (
+              <span className="text-xs text-muted-foreground">
+                Last checked {new Date(lastChecked).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2 items-center">
+            {availableCount > 0 && (
               <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 border-0">
-                {availableDomains.length} available
+                {availableCount} available
               </Badge>
             )}
-            {unavailableDomains.length > 0 && (
+            {unavailableCount > 0 && (
               <Badge variant="secondary" className="bg-muted text-muted-foreground border-0">
-                {unavailableDomains.length} taken
+                {unavailableCount} taken
               </Badge>
             )}
-            {checkingDomains.length > 0 && (
+            {checkingCount > 0 && (
               <Badge variant="secondary" className="bg-muted text-muted-foreground border-0">
-                {checkingDomains.length} checking
+                {checkingCount} checking
               </Badge>
+            )}
+            {onRefresh && messageId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => onRefresh(messageId)}
+                disabled={checkingCount > 0}
+              >
+                <RefreshCw className="h-3 w-3 mr-1" />
+                Refresh
+              </Button>
             )}
           </div>
         </div>
 
         {/* Domain list */}
         <div className="space-y-2">
-          {availableDomains.map((domain) => (
-            <DomainRow
-              key={domain.domain}
-              domain={domain}
-              registrars={registrars}
-              onCopy={handleCopyDomain}
-              copied={copiedDomain === domain.domain}
-            />
-          ))}
-          {checkingDomains.map((domain) => (
-            <DomainRow
-              key={domain.domain}
-              domain={domain}
-              registrars={registrars}
-              onCopy={handleCopyDomain}
-              copied={copiedDomain === domain.domain}
-            />
-          ))}
-          {unavailableDomains.map((domain) => (
+          {orderedDomains.map((domain) => (
             <DomainRow
               key={domain.domain}
               domain={domain}
@@ -116,7 +130,7 @@ function DomainRow({
         domain.checking && "bg-muted/20",
       )}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
         {domain.checking ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
         ) : domain.available === true ? (
@@ -124,7 +138,7 @@ function DomainRow({
         ) : (
           <X className="h-4 w-4 text-muted-foreground shrink-0" />
         )}
-        <div className="min-w-0">
+        <div className="min-w-0 flex flex-col sm:flex-row sm:items-center sm:gap-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -143,7 +157,11 @@ function DomainRow({
               <p>Click to copy</p>
             </TooltipContent>
           </Tooltip>
-          {domain.registrar && <span className="text-xs text-muted-foreground">Registrar: {domain.registrar}</span>}
+          {domain.registrar && (
+            <span className="text-xs text-muted-foreground sm:shrink-0 sm:text-right">
+              Registrar: {domain.registrar}
+            </span>
+          )}
         </div>
       </div>
 
@@ -152,9 +170,9 @@ function DomainRow({
           {registrars.map((registrar) => (
             <Button
               key={registrar.id}
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="h-7 px-2 text-xs hover:bg-emerald-500/10"
+              className="h-7 px-2 text-xs border-emerald-200 dark:border-emerald-800 bg-background/80 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 dark:hover:bg-emerald-500 dark:hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-medium transition-all"
               onClick={() => window.open(registrar.url + domain.domain, "_blank")}
             >
               {registrar.name}
