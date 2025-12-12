@@ -46,6 +46,7 @@ export const zh: Translations = {
   chat: {
     thinking: "思考中...",
     inputPlaceholder: "要求更多建议或细化你的需求...",
+    apiKeyRequired: "请先在设置中填写 API Key 再发送。",
     domainAvailable: "可注册",
     domainRegistered: "已注册",
     checkWhois: "查询 WHOIS",

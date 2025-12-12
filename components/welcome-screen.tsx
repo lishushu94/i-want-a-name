@@ -11,9 +11,11 @@ interface WelcomeScreenProps {
   setInput: (value: string) => void
   onSubmit: (e: React.FormEvent) => void
   isLoading: boolean
+  disableSubmit?: boolean
+  warning?: string | null
 }
 
-export function WelcomeScreen({ input, setInput, onSubmit, isLoading }: WelcomeScreenProps) {
+export function WelcomeScreen({ input, setInput, onSubmit, isLoading, disableSubmit, warning }: WelcomeScreenProps) {
   const { t } = useI18n()
 
   const suggestions = [
@@ -46,7 +48,9 @@ export function WelcomeScreen({ input, setInput, onSubmit, isLoading }: WelcomeS
     if ((e.nativeEvent as any).isComposing) return
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      onSubmit(e)
+      if (!disableSubmit) {
+        onSubmit(e)
+      }
     }
   }
 
@@ -66,17 +70,18 @@ export function WelcomeScreen({ input, setInput, onSubmit, isLoading }: WelcomeS
               onKeyDown={handleKeyDown}
               placeholder={t("welcome.placeholder")}
               className="min-h-[120px] resize-none rounded-xl pr-14 text-base"
-              disabled={isLoading}
+              disabled={isLoading || disableSubmit}
             />
             <Button
               type="submit"
               size="icon"
               className="absolute bottom-3 right-3 h-10 w-10 rounded-lg"
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || disableSubmit}
             >
               <Send className="h-4 w-4" />
             </Button>
           </div>
+          {warning && <p className="text-xs text-destructive mt-2 text-left">{warning}</p>}
         </form>
 
         {/* Suggestions */}

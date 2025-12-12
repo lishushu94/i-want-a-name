@@ -44,6 +44,7 @@ export const en = {
   chat: {
     thinking: "Thinking...",
     inputPlaceholder: "Ask for more suggestions or refine your requirements...",
+    apiKeyRequired: "Please set your API key in Settings before sending.",
     domainAvailable: "Available",
     domainRegistered: "Registered",
     checkWhois: "Check WHOIS",

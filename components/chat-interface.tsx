@@ -49,6 +49,7 @@ export function ChatInterface() {
   const [currentConversationId, setCurrentConvId] = useState<string | null>(null)
   const [viewType, setViewType] = useState<ViewType>("home")
   const [mounted, setMounted] = useState(false)
+  const missingApiKey = !settings?.apiKey?.trim()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const whoisService = useRef(createWhoisService())
@@ -58,15 +59,11 @@ export function ChatInterface() {
     const loadedSettings = getSettings()
     setSettings(loadedSettings)
 
-    if (!loadedSettings.apiKey) {
-      setViewType("settings")
-    }
-
     const convs = getConversations()
     setConversations(convs)
 
     const currentId = getCurrentConversationId()
-    if (currentId && loadedSettings.apiKey) {
+    if (currentId) {
       const conv = convs.find((c) => c.id === currentId)
       if (conv) {
         setMessages(conv.messages)
@@ -230,6 +227,7 @@ export function ChatInterface() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading || !settings) return
+    if (missingApiKey) return
 
     const isNewConversation = messages.length === 0
     const conversationId = currentConversationId || crypto.randomUUID()
@@ -454,7 +452,14 @@ export function ChatInterface() {
             <header className="flex items-center justify-between px-6 py-4 shrink-0">
               <span className="text-sm text-muted-foreground">i want a name</span>
             </header>
-            <WelcomeScreen input={input} setInput={setInput} onSubmit={handleSubmit} isLoading={isLoading} />
+            <WelcomeScreen
+              input={input}
+              setInput={setInput}
+              onSubmit={handleSubmit}
+              isLoading={isLoading}
+              disableSubmit={missingApiKey}
+              warning={missingApiKey ? t("chat.apiKeyRequired") : null}
+            />
           </>
         ) : (
           <>
@@ -506,11 +511,14 @@ export function ChatInterface() {
                     type="submit"
                     size="icon"
                     className="h-[52px] w-[52px] rounded-full shrink-0 bg-primary hover:bg-primary/90 shadow-lg"
-                    disabled={isLoading || !input.trim()}
+                    disabled={isLoading || !input.trim() || missingApiKey}
                   >
                     {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
                   </Button>
                 </div>
+                {missingApiKey && (
+                  <p className="text-xs text-destructive mt-2">{t("chat.apiKeyRequired")}</p>
+                )}
               </form>
             </div>
           </>
