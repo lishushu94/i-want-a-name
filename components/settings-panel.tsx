@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useEffect, useRef, useState } from "react"
-import type { Settings, Registrar, AIProvider, Conversation } from "@/lib/types"
+import type { Settings, Registrar, ProviderConfig, Conversation } from "@/lib/types"
 import { DEFAULT_REGISTRARS } from "@/lib/types"
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT_WITH_TOOLS } from "@/lib/ai-service"
 import {
@@ -21,6 +21,8 @@ import { Switch } from "@/components/ui/switch"
 import { Eye, EyeOff, Check, RotateCcw, Plus, Trash2, Upload, Download, Copy } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n-context"
+import { PROVIDER_PRESETS, getProviderPreset } from "@/lib/provider-catalog"
+import { fetchOpenRouterModels } from "@/lib/openrouter"
 
 interface SettingsPanelProps {
   onSettingsChange?: (settings: Settings) => void
@@ -41,12 +43,15 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
     model: "gpt-4o-mini",
     systemPrompt: "",
     registrars: DEFAULT_REGISTRARS,
-    providers: [],
-    activeProviderId: "",
+    activeVendor: "openai",
+    providerConfigs: {
+      openai: {
+        apiKey: "",
+        endpoint: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      },
+    },
   })
-
-  // Local state for the current editing provider
-  const [activeProvider, setActiveProvider] = useState<AIProvider | null>(null)
 
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversationId, setSelectedConversationId] = useState<string>("all")
@@ -62,29 +67,80 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
   const [showKey, setShowKey] = useState(false)
   const [newRegistrar, setNewRegistrar] = useState({ name: "", url: "" })
   const [showAddForm, setShowAddForm] = useState(false)
+  const [modelsSyncStatus, setModelsSyncStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle")
+  const [modelsSyncMessage, setModelsSyncMessage] = useState<string | null>(null)
+
+  const activeVendor = settings.activeVendor || "openai"
+  const activePreset = getProviderPreset(activeVendor)
+  const activeConfig: ProviderConfig = settings.providerConfigs?.[activeVendor] ?? {
+    apiKey: "",
+    endpoint: activePreset?.defaultEndpoint ?? "https://api.openai.com/v1",
+    model: activePreset?.defaultModel ?? "gpt-4o-mini",
+  }
+  const modelOptions =
+    activeConfig.availableModels && activeConfig.availableModels.length > 0
+      ? activeConfig.availableModels.map((m) => ({ value: m, label: m }))
+      : activePreset?.models && activePreset.models.length > 0
+        ? activePreset.models.map((m) => ({ value: m, label: m }))
+        : MODELS
+
+  const updateActiveConfig = (patch: Partial<ProviderConfig>) => {
+    const nextConfig: ProviderConfig = { ...activeConfig, ...patch }
+    const nextSettings: Settings = {
+      ...settings,
+      activeVendor,
+      providerConfigs: {
+        ...(settings.providerConfigs ?? {}),
+        [activeVendor]: nextConfig,
+      },
+      apiKey: nextConfig.apiKey,
+      apiEndpoint: nextConfig.endpoint,
+      model: nextConfig.model,
+    }
+    setSettings(nextSettings)
+    triggerAutoSave(nextSettings)
+  }
+
+  const handleSyncModels = async () => {
+    if (activePreset?.id !== "openrouter") return
+    if (!activeConfig.apiKey?.trim()) {
+      setModelsSyncStatus("error")
+      setModelsSyncMessage(t("settings.modelsSyncNeedKey"))
+      return
+    }
+
+    setModelsSyncStatus("syncing")
+    setModelsSyncMessage(null)
+    try {
+      const extraHeaders: Record<string, string> = {
+        ...(activeConfig.headers ?? {}),
+      }
+      if (typeof window !== "undefined") {
+        extraHeaders["HTTP-Referer"] ||= window.location.origin
+        extraHeaders["X-Title"] ||= "i want a name"
+      }
+
+      const models = await fetchOpenRouterModels(activeConfig.endpoint, activeConfig.apiKey, extraHeaders)
+      updateActiveConfig({
+        availableModels: models,
+        modelsUpdatedAt: Date.now(),
+        headers: extraHeaders,
+      })
+
+      setModelsSyncStatus("ok")
+      setModelsSyncMessage(`${t("settings.modelsSyncOk")} (${models.length})`)
+      setTimeout(() => setModelsSyncStatus("idle"), 2000)
+    } catch (error) {
+      setModelsSyncStatus("error")
+      setModelsSyncMessage(error instanceof Error ? error.message : t("settings.modelsSyncFailed"))
+    }
+  }
 
   useEffect(() => {
     const loaded = getSettings()
     setSettings(loaded)
     setConversations(getConversations())
     setUseCustomPrompt(Boolean(loaded.systemPrompt && loaded.systemPrompt.trim().length > 0))
-
-    // Set active provider
-    if (loaded.providers && loaded.providers.length > 0) {
-      const active = loaded.providers.find((p) => p.id === loaded.activeProviderId) || loaded.providers[0]
-      setActiveProvider(active)
-    } else {
-      // Init with default if empty (should be handled by migration but just in case)
-      const defaultProvider: AIProvider = {
-        id: "default",
-        name: "Default Provider",
-        apiKey: "",
-        endpoint: "https://api.openai.com/v1",
-        model: "gpt-4o-mini",
-      }
-      setActiveProvider(defaultProvider)
-      setSettings({ ...loaded, providers: [defaultProvider], activeProviderId: "default" })
-    }
   }, [])
 
   const triggerAutoSave = (nextSettings: Settings) => {
@@ -108,7 +164,7 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
   const handleResetPrompt = () => {
     setSettings({ ...settings, systemPrompt: "" })
     setUseCustomPrompt(false)
-    triggerAutoSave({ ...settings, systemPrompt: "", providers: settings.providers })
+    triggerAutoSave({ ...settings, systemPrompt: "" })
   }
 
   useEffect(() => {
@@ -170,75 +226,6 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
     const next = { ...settings, registrars: DEFAULT_REGISTRARS }
     setSettings(next)
     triggerAutoSave(next)
-  }
-
-  const handleProviderChange = (providerId: string) => {
-    // Save current changes first to local state list (not storage yet)
-    if (activeProvider) {
-      const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
-      const next = { ...settings, providers: updatedProviders }
-      setSettings(next)
-      triggerAutoSave(next)
-    }
-
-    const nextProvider = settings.providers?.find((p) => p.id === providerId)
-    if (nextProvider) {
-      setActiveProvider(nextProvider)
-    }
-  }
-
-  const handleAddProvider = () => {
-    // Save current
-    if (activeProvider) {
-      const updatedProviders = (settings.providers || []).map((p) => (p.id === activeProvider.id ? activeProvider : p))
-      const next = { ...settings, providers: updatedProviders }
-      setSettings(next)
-      triggerAutoSave(next)
-    }
-
-    const newProvider: AIProvider = {
-      id: `provider-${Date.now()}`,
-      name: "New Provider",
-      apiKey: "",
-      endpoint: "https://api.openai.com/v1",
-      model: "gpt-4o-mini",
-    }
-
-    const next = {
-      ...settings,
-      providers: [...(settings.providers || []), newProvider],
-    }
-    setSettings(next)
-    triggerAutoSave(next)
-    setActiveProvider(newProvider)
-  }
-
-  const handleDeleteProvider = () => {
-    if (!activeProvider || (settings.providers?.length || 0) <= 1) return
-
-    if (confirm(t("settings.deleteProviderConfirm"))) {
-      const updatedProviders = settings.providers?.filter((p) => p.id !== activeProvider.id) || []
-      const nextActive = updatedProviders[0]
-
-      setSettings({
-        ...settings,
-        providers: updatedProviders,
-        activeProviderId: nextActive?.id,
-      })
-      setActiveProvider(nextActive)
-
-      // Trigger save to persist deletion immediately if desired, or let user click save
-      // For safety, let's auto-save on delete
-      const newSettings = {
-        ...settings,
-        providers: updatedProviders,
-        activeProviderId: nextActive.id,
-        apiKey: nextActive.apiKey,
-        apiEndpoint: nextActive.endpoint,
-        model: nextActive.model,
-      }
-      triggerAutoSave(newSettings)
-    }
   }
 
   const refreshConversations = (next?: Conversation[]) => {
@@ -348,196 +335,156 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
         <div className="max-w-2xl space-y-8 pb-8">
           {/* Provider Selection Section */}
           <section className="space-y-4">
-            <h2 className="text-lg font-medium border-b pb-2">{t("settings.providers")}</h2>
-            <p className="text-sm text-muted-foreground">
-              {t("settings.providersNote")}
-            </p>
-            <div className="flex gap-2 items-end">
-              <div className="flex-1 space-y-2">
-                <Label>{t("settings.selectProvider")}</Label>
-                <Select
-                  value={activeProvider?.id}
-                  onValueChange={(val) => handleProviderChange(val)}
-                  disabled={!settings.providers || settings.providers.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(settings.providers || []).map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={handleAddProvider} size="icon" variant="outline" title={t("settings.addProvider")}>
-                <Plus className="h-4 w-4" />
-              </Button>
-              <Button
-                onClick={handleDeleteProvider}
-                size="icon"
-                variant="outline"
-                className="text-destructive hover:text-destructive"
-                title={t("settings.deleteProvider")}
-                disabled={(settings.providers?.length || 0) <= 1}
+            <h2 className="text-lg font-medium border-b pb-2">{t("settings.apiConfig")}</h2>
+            <div className="space-y-2">
+              <Label htmlFor="providerPreset">{t("settings.providerPreset")}</Label>
+              <Select
+                value={activeVendor}
+                onValueChange={(value) => {
+                  const preset = getProviderPreset(value)
+                  const existing = settings.providerConfigs?.[value]
+                  const nextConfig: ProviderConfig =
+                    existing ?? {
+                      apiKey: "",
+                      endpoint: preset?.defaultEndpoint ?? "https://api.openai.com/v1",
+                      model: preset?.defaultModel ?? "gpt-4o-mini",
+                      headers: preset?.defaultHeaders,
+                    }
+
+                  const nextSettings: Settings = {
+                    ...settings,
+                    activeVendor: value,
+                    providerConfigs: {
+                      ...(settings.providerConfigs ?? {}),
+                      [value]: nextConfig,
+                    },
+                    apiKey: nextConfig.apiKey,
+                    apiEndpoint: nextConfig.endpoint,
+                    model: nextConfig.model,
+                  }
+                  setSettings(nextSettings)
+                  triggerAutoSave(nextSettings)
+                }}
               >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+                <SelectTrigger id="providerPreset">
+                  <SelectValue placeholder={t("settings.providerPreset")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROVIDER_PRESETS.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id} disabled={!preset.enabled}>
+                      {preset.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{t("settings.providerPresetDesc")}</p>
             </div>
           </section>
 
           {/* API Settings Section */}
-          {activeProvider && (
-            <section className="space-y-4 p-4 border rounded-lg bg-muted/20">
-              <div className="space-y-2">
-                <Label htmlFor="providerName">{t("settings.providerName")}</Label>
-                <Input
-                  id="providerName"
-                  value={activeProvider.name}
-                  onChange={(e) => {
-                    const nextProvider = { ...activeProvider, name: e.target.value }
-                    setActiveProvider(nextProvider)
-                    const updatedProviders = (settings.providers || []).map((p) =>
-                      p.id === nextProvider.id ? nextProvider : p,
-                    )
-                    const nextSettings = {
-                      ...settings,
-                      providers: updatedProviders,
-                    }
-                    setSettings(nextSettings)
-                    triggerAutoSave(nextSettings)
-                  }}
-                />
-              </div>
+          <section className="space-y-4 p-4 border rounded-lg bg-muted/20">
 
-              <div className="space-y-2">
-                <Label htmlFor="apiKey">{t("settings.apiKey")}</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="apiKey"
-                    type={showKey ? "text" : "password"}
-                    placeholder="sk-..."
-                    value={activeProvider.apiKey}
-                    onChange={(e) => {
-                      const nextProvider = { ...activeProvider, apiKey: e.target.value }
-                      setActiveProvider(nextProvider)
-                      const updatedProviders = (settings.providers || []).map((p) =>
-                        p.id === nextProvider.id ? nextProvider : p,
-                      )
-                      const nextSettings = {
-                        ...settings,
-                        providers: updatedProviders,
-                        apiKey: nextProvider.apiKey,
-                      }
-                      setSettings(nextSettings)
-                      triggerAutoSave(nextSettings)
-                    }}
-                    className="font-mono text-sm"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>
-                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
+	              <div className="space-y-2">
+	                <Label htmlFor="apiKey">{t("settings.apiKey")}</Label>
+	                <div className="flex gap-2">
+	                  <Input
+	                    id="apiKey"
+	                    type={showKey ? "text" : "password"}
+	                    placeholder="sk-..."
+	                    value={activeConfig.apiKey}
+	                    onChange={(e) => updateActiveConfig({ apiKey: e.target.value })}
+	                    className="font-mono text-sm"
+	                  />
+	                  <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>
+	                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+	                  </Button>
+	                </div>
                 <p className="text-xs text-muted-foreground">
-                  {t("settings.apiKeyDesc")}{" "}
-                  <a
-                    href="https://platform.openai.com/api-keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    OpenAI Platform
-                  </a>
+                  {t("settings.apiKeyDesc")}
+                  {activePreset?.apiKeyHelpUrl ? (
+                    <>
+                      {" "}
+                      <a
+                        href={activePreset.apiKeyHelpUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        {t("settings.apiKeyHelpLink")}
+                      </a>
+                    </>
+                  ) : null}
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="endpoint">{t("settings.apiEndpoint")}</Label>
-                  <Input
-                    id="endpoint"
-                    type="text"
-                    placeholder="https://api.openai.com/v1"
-                    value={activeProvider.endpoint}
-                    onChange={(e) => {
-                      const nextProvider = { ...activeProvider, endpoint: e.target.value }
-                      setActiveProvider(nextProvider)
-                      const updatedProviders = (settings.providers || []).map((p) =>
-                        p.id === nextProvider.id ? nextProvider : p,
-                      )
-                      const nextSettings = {
-                        ...settings,
-                        providers: updatedProviders,
-                        apiEndpoint: nextProvider.endpoint,
-                      }
-                      setSettings(nextSettings)
-                      triggerAutoSave(nextSettings)
-                    }}
-                    className="font-mono text-sm"
-                  />
+	              <div className="space-y-2">
+	                <Label htmlFor="endpoint">{t("settings.apiEndpoint")}</Label>
+	                  <Input
+	                    id="endpoint"
+	                    type="text"
+	                    placeholder={activePreset?.defaultEndpoint ?? "https://api.openai.com/v1"}
+	                    value={activeConfig.endpoint}
+	                    onChange={(e) => updateActiveConfig({ endpoint: e.target.value })}
+	                    className="font-mono text-sm"
+	                  />
                 <p className="text-xs text-muted-foreground">{t("settings.apiEndpointDesc")}</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="model">{t("settings.model")}</Label>
-                <Select
-                  value={activeProvider.model}
-                  onValueChange={(value) => {
-                    const nextProvider = { ...activeProvider, model: value }
-                      setActiveProvider(nextProvider)
-                      const updatedProviders = (settings.providers || []).map((p) =>
-                        p.id === nextProvider.id ? nextProvider : p,
-                      )
-                      const nextSettings = {
-                        ...settings,
-                        providers: updatedProviders,
-                        model: nextProvider.model,
-                      }
-                      setSettings(nextSettings)
-                      triggerAutoSave(nextSettings)
-                    }}
-                  >
+	              </div>
+	
+	              <div className="space-y-2">
+	                <div className="flex items-center justify-between gap-2">
+	                  <Label htmlFor="model">{t("settings.model")}</Label>
+	                  {activePreset?.id === "openrouter" && (
+	                    <Button
+	                      type="button"
+	                      variant="outline"
+	                      size="sm"
+	                      onClick={handleSyncModels}
+	                      disabled={modelsSyncStatus === "syncing"}
+	                    >
+	                      {modelsSyncStatus === "syncing" ? t("settings.modelsSyncing") : t("settings.modelsSync")}
+	                    </Button>
+	                  )}
+	                </div>
+		                <Select
+		                  value={activeConfig.model}
+		                  onValueChange={(value) => updateActiveConfig({ model: value })}
+		                  >
                   <SelectTrigger>
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
-                    {MODELS.map((model) => (
+                    {modelOptions.map((model) => (
                       <SelectItem key={model.value} value={model.value}>
                         {model.label}
                       </SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-                <div className="space-y-1 mt-2">
-                  <Label htmlFor="customModel" className="text-xs text-muted-foreground">
-                    {t("settings.customModelLabel")}
-                  </Label>
-                  <Input
-                    id="customModel"
-                    placeholder="custom-model-name"
-                    value={activeProvider.model}
-                    onChange={(e) => {
-                      const nextProvider = { ...activeProvider, model: e.target.value }
-                      setActiveProvider(nextProvider)
-                      const updatedProviders = (settings.providers || []).map((p) =>
-                        p.id === nextProvider.id ? nextProvider : p,
-                      )
-                      const nextSettings = {
-                        ...settings,
-                        providers: updatedProviders,
-                        model: nextProvider.model,
-                      }
-                      setSettings(nextSettings)
-                      triggerAutoSave(nextSettings)
-                    }}
-                    className="font-mono text-sm"
-                  />
+	                  </SelectContent>
+	                </Select>
+	                {activePreset?.id === "openrouter" && modelsSyncMessage && (
+	                  <p
+	                    className={cn(
+	                      "text-xs",
+	                      modelsSyncStatus === "error" ? "text-destructive" : "text-muted-foreground",
+	                    )}
+	                  >
+	                    {modelsSyncMessage}
+	                  </p>
+	                )}
+	                <div className="space-y-1 mt-2">
+	                  <Label htmlFor="customModel" className="text-xs text-muted-foreground">
+	                    {t("settings.customModelLabel")}
+	                  </Label>
+	                  <Input
+	                    id="customModel"
+	                    placeholder="custom-model-name"
+	                    value={activeConfig.model}
+	                    onChange={(e) => updateActiveConfig({ model: e.target.value })}
+	                    className="font-mono text-sm"
+	                  />
                   <p className="text-xs text-muted-foreground">{t("settings.modelDesc")}</p>
                 </div>
               </div>
             </section>
-          )}
 
           {/* System Prompt Section */}
           <section className="space-y-4">
