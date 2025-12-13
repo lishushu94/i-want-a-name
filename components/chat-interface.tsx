@@ -36,6 +36,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Send, Loader2, Bot, ArrowLeft, Languages, Check } from "lucide-react"
 import { useI18n } from "@/lib/i18n-context"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { resolveProviderConfig } from "@/lib/provider-runtime"
 
 type ViewType = "home" | "chat" | "settings"
 
@@ -49,7 +50,7 @@ export function ChatInterface() {
   const [currentConversationId, setCurrentConvId] = useState<string | null>(null)
   const [viewType, setViewType] = useState<ViewType>("home")
   const [mounted, setMounted] = useState(false)
-  const missingApiKey = !settings?.apiKey?.trim()
+  const missingApiKey = !(settings ? resolveProviderConfig(settings)?.apiKey?.trim() : "")
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const whoisService = useRef(createWhoisService())

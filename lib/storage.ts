@@ -3,11 +3,13 @@ import type {
   Settings,
   Registrar,
   AIProvider,
+  ProviderConfig,
   ConversationExportPayload,
   ConversationImportStrategy,
   Message,
 } from "./types"
 import { DEFAULT_REGISTRARS } from "./types"
+import { detectVendorFromEndpoint, getProviderPreset } from "./provider-catalog"
 
 const STORAGE_KEYS = {
   SETTINGS: "iwantaname_settings",
@@ -18,15 +20,43 @@ const STORAGE_KEYS = {
 const EXPORT_VERSION = "1.0.0"
 const APP_NAME = "i want a name"
 
+function coalesceString(...values: Array<string | undefined | null>): string {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim().length > 0) return v
+  }
+  return ""
+}
+
+function buildProviderConfig(vendor: string, src?: Partial<AIProvider & ProviderConfig>): ProviderConfig {
+  const preset = getProviderPreset(vendor)
+  return {
+    apiKey: coalesceString(src?.apiKey, ""),
+    endpoint: coalesceString(src?.endpoint, preset?.defaultEndpoint, "https://api.openai.com/v1"),
+    model: coalesceString(src?.model, preset?.defaultModel, "gpt-4o-mini"),
+    headers: src?.headers,
+    availableModels: src?.availableModels,
+    modelsUpdatedAt: src?.modelsUpdatedAt,
+  }
+}
+
 export function getSettings(): Settings {
   if (typeof window === "undefined") {
+    const vendor = "openai"
+    const preset = getProviderPreset(vendor)
     return {
       apiKey: "",
       apiEndpoint: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
       systemPrompt: "",
       registrars: DEFAULT_REGISTRARS,
-      providers: [],
+      activeVendor: vendor,
+      providerConfigs: {
+        [vendor]: {
+          apiKey: "",
+          endpoint: preset?.defaultEndpoint ?? "https://api.openai.com/v1",
+          model: preset?.defaultModel ?? "gpt-4o-mini",
+        },
+      },
     }
   }
   const stored = localStorage.getItem(STORAGE_KEYS.SETTINGS)
@@ -38,32 +68,62 @@ export function getSettings(): Settings {
       registrars: parsed.registrars ?? DEFAULT_REGISTRARS,
     }
 
-    // Migration: If no providers but has legacy key
-    if ((!settings.providers || settings.providers.length === 0) && settings.apiKey) {
-      const defaultProvider: AIProvider = {
-        id: "default",
-        name: "Default Provider",
-        apiKey: settings.apiKey,
-        endpoint: settings.apiEndpoint || "https://api.openai.com/v1",
-        model: settings.model || "gpt-4o-mini",
-      }
-      settings.providers = [defaultProvider]
-      settings.activeProviderId = "default"
+    if (!settings.providerConfigs) {
+      settings.providerConfigs = {}
     }
 
-    if (!settings.providers) {
-      settings.providers = []
+    // Migration (v1): multi-provider instances -> per-vendor configs
+    if (Array.isArray(settings.providers) && settings.providers.length > 0) {
+      const active =
+        settings.providers.find((p: AIProvider) => p.id === settings.activeProviderId) ?? settings.providers[0]
+
+      for (const p of settings.providers as AIProvider[]) {
+        const vendor = (p as any).vendor || detectVendorFromEndpoint(p.endpoint)
+        if (!settings.providerConfigs[vendor]) {
+          settings.providerConfigs[vendor] = buildProviderConfig(vendor, p)
+        }
+      }
+
+      if (!settings.activeVendor) {
+        settings.activeVendor = ((active as any).vendor || detectVendorFromEndpoint(active.endpoint)) as string
+      }
+
+      // Clean up to avoid confusion; keep legacy apiKey/apiEndpoint/model for backwards compatibility
+      delete settings.providers
+      delete settings.activeProviderId
+    }
+
+    // Migration (v0): legacy single provider fields -> per-vendor config
+    if (!settings.activeVendor) {
+      settings.activeVendor = detectVendorFromEndpoint(settings.apiEndpoint) as string
+    }
+
+    if (!settings.providerConfigs[settings.activeVendor]) {
+      settings.providerConfigs[settings.activeVendor] = buildProviderConfig(settings.activeVendor, {
+        apiKey: settings.apiKey,
+        endpoint: settings.apiEndpoint,
+        model: settings.model,
+      })
     }
 
     return settings
   }
+  const vendor = "openai"
+  const preset = getProviderPreset(vendor)
   return {
     apiKey: "",
     apiEndpoint: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
     systemPrompt: "",
     registrars: DEFAULT_REGISTRARS,
-    providers: [],
+    activeVendor: vendor,
+    providerConfigs: {
+      [vendor]: {
+        apiKey: "",
+        endpoint: preset?.defaultEndpoint ?? "https://api.openai.com/v1",
+        model: preset?.defaultModel ?? "gpt-4o-mini",
+      },
+    },
   }
 }
 

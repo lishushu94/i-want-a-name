@@ -1,5 +1,7 @@
 import type { Settings, Message, ToolCall } from "./types"
 import { RECOMMEND_DOMAINS_TOOL } from "./types"
+import { getProviderPreset } from "./provider-catalog"
+import { resolveProviderConfig } from "./provider-runtime"
 
 export const DEFAULT_SYSTEM_PROMPT = `你是一个专门帮助创业者推荐域名的AI助手，你的名字叫"i want a name"。
 
@@ -63,14 +65,22 @@ function checkToolsSupport(settings: Settings): boolean {
     return false
   }
 
+  const provider = resolveProviderConfig(settings)
+  if (!provider) return false
+
+  const preset = getProviderPreset(provider.vendor)
+  if (typeof preset?.supportsTools === "boolean") {
+    return preset.supportsTools
+  }
+
   // Check endpoint (OpenAI or compatible)
-  if (settings.apiEndpoint?.includes("openai.com")) {
+  if (provider.apiEndpoint?.includes("openai.com")) {
     return true
   }
 
   // Check model name
   const supportedModels = ["gpt-4", "gpt-3.5-turbo", "gpt-4o"]
-  if (supportedModels.some((m) => settings.model?.startsWith(m))) {
+  if (supportedModels.some((m) => provider.model?.startsWith(m))) {
     return true
   }
 
@@ -86,8 +96,9 @@ export async function streamChat(
   onComplete: () => void,
   onError: (error: string) => void,
 ): Promise<void> {
-  if (!settings.apiKey) {
-    onError("Please set your OpenAI API key in settings")
+  const provider = resolveProviderConfig(settings)
+  if (!provider?.apiKey) {
+    onError("Please set your API key in settings")
     return
   }
 
@@ -101,7 +112,7 @@ export async function streamChat(
   ]
 
   const requestBody: any = {
-    model: settings.model,
+    model: provider.model,
     messages: apiMessages,
     stream: true,
   }
@@ -113,11 +124,12 @@ export async function streamChat(
   }
 
   try {
-    const response = await fetch(`${settings.apiEndpoint}/chat/completions`, {
+    const response = await fetch(`${provider.apiEndpoint}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.apiKey}`,
+        Authorization: `Bearer ${provider.apiKey}`,
+        ...(provider.headers ?? {}),
       },
       body: JSON.stringify(requestBody),
     })
@@ -155,8 +167,9 @@ export async function streamChat(
       const lines = chunk.split("\n").filter((line) => line.trim() !== "")
 
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6)
+        // Some providers send `data: { ... }` (with a space), others send `data:{...}` (no space).
+        if (line.startsWith("data:")) {
+          const data = line.slice(5).trimStart()
           if (data === "[DONE]") {
             // Trigger tool_call callback if we have accumulated tool calls
             if (state.toolCallsMap.size > 0) {
@@ -287,19 +300,21 @@ export function extractDomainsUnified(
 }
 
 export async function summarizeConversationTitle(firstMessage: string, settings: Settings): Promise<string> {
-  if (!settings.apiKey) {
+  const provider = resolveProviderConfig(settings)
+  if (!provider?.apiKey) {
     return firstMessage.slice(0, 30) + (firstMessage.length > 30 ? "..." : "")
   }
 
   try {
-    const response = await fetch(`${settings.apiEndpoint}/chat/completions`, {
+    const response = await fetch(`${provider.apiEndpoint}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.apiKey}`,
+        Authorization: `Bearer ${provider.apiKey}`,
+        ...(provider.headers ?? {}),
       },
       body: JSON.stringify({
-        model: settings.model,
+        model: provider.model,
         messages: [
           {
             role: "system",

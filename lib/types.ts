@@ -58,10 +58,27 @@ export interface AIProvider {
   apiKey: string
   endpoint: string
   model: string
+  vendor?: string
+  headers?: Record<string, string>
+  availableModels?: string[]
+  modelsUpdatedAt?: number
+}
+
+export interface ProviderConfig {
+  apiKey: string
+  endpoint: string
+  model: string
+  headers?: Record<string, string>
+  availableModels?: string[]
+  modelsUpdatedAt?: number
 }
 
 export interface Settings {
-  // New fields for multi-provider support
+  // Current provider selection (preferred)
+  activeVendor?: string
+  providerConfigs?: Record<string, ProviderConfig>
+
+  // Legacy multi-provider fields (kept for migration)
   providers?: AIProvider[]
   activeProviderId?: string
 
