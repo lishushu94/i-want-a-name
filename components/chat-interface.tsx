@@ -52,7 +52,10 @@ export function ChatInterface() {
   const [mounted, setMounted] = useState(false)
   const missingApiKey = !(settings ? resolveProviderConfig(settings)?.apiKey?.trim() : "")
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const isAtBottomRef = useRef(true)
+  const forceScrollToBottomRef = useRef(false)
   const whoisService = useRef(createWhoisService())
 
   useEffect(() => {
@@ -76,7 +79,25 @@ export function ChatInterface() {
   }, [])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (viewType !== "chat") return
+    const el = scrollContainerRef.current
+    if (!el) return
+
+    const updateIsAtBottom = () => {
+      const threshold = 80
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      isAtBottomRef.current = distanceFromBottom < threshold
+    }
+
+    updateIsAtBottom()
+    el.addEventListener("scroll", updateIsAtBottom, { passive: true })
+    return () => el.removeEventListener("scroll", updateIsAtBottom)
+  }, [viewType])
+
+  useEffect(() => {
+    if (!forceScrollToBottomRef.current && !isAtBottomRef.current) return
+    messagesEndRef.current?.scrollIntoView({ behavior: forceScrollToBottomRef.current ? "auto" : "smooth" })
+    forceScrollToBottomRef.current = false
   }, [messages])
 
   const recheckDomainsOnLoad = async (msgs: Message[]) => {
@@ -246,6 +267,7 @@ export function ChatInterface() {
     }
 
     const newMessages = [...messages, userMessage]
+    forceScrollToBottomRef.current = true
     setMessages(newMessages)
     setInput("")
     setIsLoading(true)
@@ -362,6 +384,7 @@ export function ChatInterface() {
   }
 
   const handleSelectConversation = (conv: Conversation) => {
+    forceScrollToBottomRef.current = true
     setMessages(conv.messages)
     setCurrentConvId(conv.id)
     setCurrentConversationId(conv.id)
@@ -477,7 +500,7 @@ export function ChatInterface() {
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto p-4 min-h-0">
+            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 min-h-0">
               <div className="max-w-3xl mx-auto">
                 {messages.map((message) => (
                   <ChatMessage key={message.id} message={message} onRefreshDomains={handleRefreshDomains} />
