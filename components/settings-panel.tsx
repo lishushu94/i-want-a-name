@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Eye, EyeOff, Save, Check, RotateCcw, Plus, Trash2, Upload, Download, Copy } from "lucide-react"
+import { Eye, EyeOff, Check, RotateCcw, Plus, Trash2, Upload, Download, Copy } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n-context"
 
@@ -57,9 +57,9 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
   const [copiedDefaultPrompt, setCopiedDefaultPrompt] = useState(false)
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const saveTimer = useRef<NodeJS.Timeout | null>(null)
+  const pendingSettingsRef = useRef<Settings | null>(null)
 
   const [showKey, setShowKey] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [newRegistrar, setNewRegistrar] = useState({ name: "", url: "" })
   const [showAddForm, setShowAddForm] = useState(false)
 
@@ -89,11 +89,13 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
 
   const triggerAutoSave = (nextSettings: Settings) => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
+    pendingSettingsRef.current = nextSettings
     setAutoSaveStatus("saving")
     saveTimer.current = setTimeout(() => {
       try {
         saveSettings(nextSettings)
         onSettingsChange?.(nextSettings)
+        pendingSettingsRef.current = null
         setAutoSaveStatus("saved")
         setTimeout(() => setAutoSaveStatus("idle"), 1500)
       } catch (error) {
@@ -110,8 +112,23 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
   }
 
   useEffect(() => {
-    setSaved(autoSaveStatus === "saved")
-  }, [autoSaveStatus])
+    return () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
+
+      if (pendingSettingsRef.current) {
+        try {
+          saveSettings(pendingSettingsRef.current)
+        } catch (error) {
+          console.error("Failed to flush pending settings:", error)
+        } finally {
+          pendingSettingsRef.current = null
+        }
+      }
+    }
+  }, [])
 
   const handleToggleRegistrar = (id: string) => {
     const registrars = (settings.registrars || DEFAULT_REGISTRARS).map((r) =>
@@ -379,7 +396,19 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
                 <Input
                   id="providerName"
                   value={activeProvider.name}
-                  onChange={(e) => setActiveProvider({ ...activeProvider, name: e.target.value })}
+                  onChange={(e) => {
+                    const nextProvider = { ...activeProvider, name: e.target.value }
+                    setActiveProvider(nextProvider)
+                    const updatedProviders = (settings.providers || []).map((p) =>
+                      p.id === nextProvider.id ? nextProvider : p,
+                    )
+                    const nextSettings = {
+                      ...settings,
+                      providers: updatedProviders,
+                    }
+                    setSettings(nextSettings)
+                    triggerAutoSave(nextSettings)
+                  }}
                 />
               </div>
 
@@ -523,7 +552,9 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
                     onCheckedChange={(checked) => {
                       setUseCustomPrompt(checked)
                       if (!checked) {
-                        setSettings({ ...settings, systemPrompt: "" })
+                        const next = { ...settings, systemPrompt: "" }
+                        setSettings(next)
+                        triggerAutoSave(next)
                       }
                     }}
                   />
@@ -604,7 +635,11 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
                   <Switch
                     id="enable-function-calling"
                     checked={settings.enableFunctionCalling ?? true}
-                    onCheckedChange={(checked) => setSettings({ ...settings, enableFunctionCalling: checked })}
+                    onCheckedChange={(checked) => {
+                      const next = { ...settings, enableFunctionCalling: checked }
+                      setSettings(next)
+                      triggerAutoSave(next)
+                    }}
                   />
                   <span className="text-sm text-muted-foreground">使用结构化工具调用推荐域名</span>
                 </div>
@@ -754,21 +789,20 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
               </Button>
             )}
           </section>
-
-          {/* Save Button */}
-          <Button onClick={handleSave} className="w-full" size="lg">
-            {saved ? (
-              <>
-                <Check className="h-4 w-4 mr-2" />
-                {t("common.saved")}
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4 mr-2" />
-                {t("common.save")}
-              </>
-            )}
-          </Button>
+          {autoSaveStatus !== "idle" && (
+            <p
+              className={cn(
+                "text-sm",
+                autoSaveStatus === "error" ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {autoSaveStatus === "saving"
+                ? t("common.saving")
+                : autoSaveStatus === "saved"
+                  ? t("common.saved")
+                  : t("common.saveFailed")}
+            </p>
+          )}
         </div>
       </div>
     </div>

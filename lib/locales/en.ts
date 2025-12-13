@@ -11,6 +11,8 @@ export const en = {
     confirm: "Confirm",
     save: "Save",
     saved: "Saved!",
+    saving: "Saving...",
+    saveFailed: "Save failed",
     loading: "Loading...",
     error: "Error",
     rename: "Rename",

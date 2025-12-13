@@ -13,6 +13,8 @@ export const zh: Translations = {
     confirm: "确认",
     save: "保存",
     saved: "已保存！",
+    saving: "保存中...",
+    saveFailed: "保存失败",
     loading: "加载中...",
     error: "错误",
     rename: "重命名",
