@@ -384,25 +384,36 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
           {/* API Settings Section */}
           <section className="space-y-4 p-4 border rounded-lg bg-muted/20">
 
-	              <div className="space-y-2">
-	                <Label htmlFor="apiKey">{t("settings.apiKey")}</Label>
-	                <div className="flex gap-2">
-	                  <Input
-	                    id="apiKey"
-	                    type={showKey ? "text" : "password"}
-	                    placeholder="sk-..."
-	                    value={activeConfig.apiKey}
-	                    onChange={(e) => updateActiveConfig({ apiKey: e.target.value })}
-	                    className="font-mono text-sm"
-	                  />
-	                  <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>
-	                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-	                  </Button>
-	                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.apiKeyDesc")}
-                  {activePreset?.apiKeyHelpUrl ? (
-                    <>
+		              <div className="space-y-2">
+		                <Label htmlFor="apiKey">{t("settings.apiKey")}</Label>
+		                <form
+		                  className="flex gap-2"
+		                  onSubmit={(e) => {
+		                    e.preventDefault()
+		                  }}
+		                >
+		                  <Input
+		                    id="apiKey"
+		                    type={showKey ? "text" : "password"}
+		                    placeholder="sk-..."
+		                    value={activeConfig.apiKey}
+		                    onChange={(e) => updateActiveConfig({ apiKey: e.target.value })}
+		                    className="font-mono text-sm"
+		                    autoComplete="off"
+		                  />
+		                  <Button
+		                    type="button"
+		                    variant="outline"
+		                    size="icon"
+		                    onClick={() => setShowKey(!showKey)}
+		                  >
+		                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+		                  </Button>
+		                </form>
+	                <p className="text-xs text-muted-foreground">
+	                  {t("settings.apiKeyDesc")}
+	                  {activePreset?.apiKeyHelpUrl ? (
+	                    <>
                       {" "}
                       <a
                         href={activePreset.apiKeyHelpUrl}

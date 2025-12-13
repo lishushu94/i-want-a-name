@@ -15,17 +15,12 @@ export class FrontendWhoisService implements WhoisService {
 
     try {
       // Using RDAP protocol - free and doesn't require API key
-      const response = await fetch(`${WHOIS_API_BASE}${domain}`, {
+      const response = await fetch(`${WHOIS_API_BASE}${encodeURIComponent(domain)}`, {
         method: "GET",
         headers: {
           Accept: "application/rdap+json",
         },
       })
-
-      if (response.status === 404) {
-        // Domain not found = likely available
-        return { ...result, available: true, checking: false }
-      }
 
       if (response.ok) {
         const data = await response.json()
@@ -46,8 +41,22 @@ export class FrontendWhoisService implements WhoisService {
         }
       }
 
-      // If we get other errors, we can't determine availability
-      return { ...result, available: null, checking: false, error: "Unable to check" }
+      // RDAP 404 can mean "domain not found" OR "RDAP not supported for this TLD" (rdap.org may return HTML).
+      if (response.status === 404) {
+        const contentType = response.headers.get("content-type") ?? ""
+        const looksLikeRdapJson =
+          contentType.includes("application/rdap+json") || contentType.includes("application/json")
+
+        if (looksLikeRdapJson) {
+          return { ...result, available: true, checking: false }
+        }
+
+        // Fall back to DNS to avoid false positives (e.g., rdap.org has no RDAP URL for some TLDs).
+        return this.checkDomainFallback(domain)
+      }
+
+      // Other errors: fall back to DNS before giving up.
+      return this.checkDomainFallback(domain)
     } catch (error) {
       // Network error or API issue - try alternative method
       return this.checkDomainFallback(domain)
@@ -57,8 +66,8 @@ export class FrontendWhoisService implements WhoisService {
   // Fallback method using DNS lookup simulation
   private async checkDomainFallback(domain: string): Promise<DomainResult> {
     try {
-      // Try to resolve via DNS-over-HTTPS (Cloudflare)
-      const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=A`, {
+      // Try to resolve via DNS-over-HTTPS (Cloudflare). NS is a better existence check than A.
+      const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(domain)}&type=NS`, {
         headers: {
           Accept: "application/dns-json",
         },
@@ -66,11 +75,20 @@ export class FrontendWhoisService implements WhoisService {
 
       if (response.ok) {
         const data = await response.json()
-        // If we get DNS records, domain is registered
-        const hasRecords = data.Answer && data.Answer.length > 0
+
+        // https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/
+        // Status: 0=NOERROR, 3=NXDOMAIN
+        if (data.Status === 3) {
+          return { domain, available: true, checking: false }
+        }
+
+        const hasAnswers = Array.isArray(data.Answer) && data.Answer.length > 0
+        const hasAuthority = Array.isArray(data.Authority) && data.Authority.length > 0
+        const hasRecords = hasAnswers || hasAuthority
+
         return {
           domain,
-          available: !hasRecords,
+          available: hasRecords ? false : null,
           checking: false,
         }
       }

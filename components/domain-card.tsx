@@ -6,9 +6,10 @@ import { DEFAULT_REGISTRARS } from "@/lib/types"
 import { getSettings } from "@/lib/storage"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Check, X, Loader2, ExternalLink, RefreshCw } from "lucide-react"
+import { Check, X, Loader2, ExternalLink, RefreshCw, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 interface DomainCardProps {
   domains: DomainResult[]
@@ -121,6 +122,10 @@ function DomainRow({
   onCopy: (domain: string) => void
   copied: boolean
 }) {
+  const MAX_INLINE_REGISTRARS = 3
+  const inlineRegistrars = registrars.slice(0, MAX_INLINE_REGISTRARS)
+  const overflowRegistrars = registrars.slice(MAX_INLINE_REGISTRARS)
+
   return (
     <div
       className={cn(
@@ -167,18 +172,48 @@ function DomainRow({
 
       {domain.available === true && registrars.length > 0 && (
         <div className="flex gap-1 shrink-0 flex-wrap justify-end">
-          {registrars.map((registrar) => (
+          {inlineRegistrars.map((registrar) => (
             <Button
               key={registrar.id}
               variant="outline"
               size="sm"
               className="h-7 px-2 text-xs border-emerald-200 dark:border-emerald-800 bg-background/80 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 dark:hover:bg-emerald-500 dark:hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-medium transition-all"
-              onClick={() => window.open(registrar.url + domain.domain, "_blank")}
+              onClick={() => window.open(registrar.url + encodeURIComponent(domain.domain), "_blank")}
             >
               {registrar.name}
               <ExternalLink className="h-3 w-3 ml-1" />
             </Button>
           ))}
+          {overflowRegistrars.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs border-emerald-200 dark:border-emerald-800 bg-background/80 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 dark:hover:bg-emerald-500 dark:hover:border-emerald-500 text-emerald-700 dark:text-emerald-400 font-medium transition-all"
+                >
+                  More
+                  <ChevronDown className="h-3 w-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {overflowRegistrars.map((registrar) => (
+                  <DropdownMenuItem
+                    key={registrar.id}
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      window.open(registrar.url + encodeURIComponent(domain.domain), "_blank")
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      {registrar.name}
+                      <ExternalLink className="h-3 w-3 opacity-60" />
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       )}
     </div>

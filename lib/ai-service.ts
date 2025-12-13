@@ -262,22 +262,130 @@ export function extractDomains(content: string): { domain: string; description?:
  * Extract domains from tool_calls (function calling)
  */
 export function extractDomainsFromToolCalls(toolCalls: ToolCall[]): { domain: string; description?: string }[] {
-  const results: { domain: string; description?: string }[] = []
+  const isLikelyDomain = (value: string) => /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(value)
+
+  const normalizeDomain = (raw: unknown): string | null => {
+    if (typeof raw !== "string") return null
+    const trimmed = raw.trim()
+    if (!trimmed) return null
+
+    const withoutScheme = trimmed.replace(/^https?:\/\//i, "")
+    const withoutPath = withoutScheme.split(/[/?#]/)[0]?.trim()
+    if (!withoutPath) return null
+    return isLikelyDomain(withoutPath) ? withoutPath : null
+  }
+
+  const sanitizeDomainEntry = (entry: any): { domain: string; description?: string } | null => {
+    const domain = normalizeDomain(entry?.domain ?? entry)
+    if (!domain) return null
+    const description = typeof entry?.description === "string" ? entry.description : undefined
+    return description ? { domain, description } : { domain }
+  }
+
+  const safeJsonParse = (raw: string): any | null => {
+    const trimmed = raw.trim()
+    if (!trimmed) return null
+
+    const tryParse = (value: string) => {
+      try {
+        return JSON.parse(value)
+      } catch {
+        return null
+      }
+    }
+
+    const direct = tryParse(trimmed)
+    if (direct !== null) {
+      if (typeof direct === "string") {
+        const nested = tryParse(direct)
+        return nested ?? direct
+      }
+      return direct
+    }
+
+    // Some providers/models may include extra text; try the largest {...} substring.
+    const firstBrace = trimmed.indexOf("{")
+    const lastBrace = trimmed.lastIndexOf("}")
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const candidate = trimmed.slice(firstBrace, lastBrace + 1).replace(/,\s*([}\]])/g, "$1")
+      const parsed = tryParse(candidate)
+      if (parsed !== null) return parsed
+    }
+
+    // Or they may send a raw array.
+    const firstBracket = trimmed.indexOf("[")
+    const lastBracket = trimmed.lastIndexOf("]")
+    if (firstBracket !== -1 && lastBracket > firstBracket) {
+      const candidate = trimmed.slice(firstBracket, lastBracket + 1).replace(/,\s*([}\]])/g, "$1")
+      const parsed = tryParse(candidate)
+      if (parsed !== null) return parsed
+    }
+
+    return null
+  }
+
+  const extractFromLooseArgs = (raw: string): { domain: string; description?: string }[] => {
+    const results: { domain: string; description?: string }[] = []
+
+    // Try to extract from per-item object chunks first.
+    const objectChunks = raw.match(/{[^{}]*}/g) ?? []
+    for (const chunk of objectChunks) {
+      const domainMatch =
+        chunk.match(/["']?domain["']?\s*:\s*["']([^"']+)["']/i) ??
+        chunk.match(/["']?domain["']?\s*:\s*([^,\s}]+)/i)
+      if (!domainMatch) continue
+
+      const normalized = normalizeDomain(domainMatch[1])
+      if (!normalized) continue
+
+      const descriptionMatch =
+        chunk.match(/["']?description["']?\s*:\s*["']([\s\S]*?)["']\s*(?:,|})/i) ??
+        chunk.match(/["']?description["']?\s*:\s*([^,\s}]+)/i)
+
+      const description = descriptionMatch?.[1]?.trim()
+      results.push(description ? { domain: normalized, description } : { domain: normalized })
+    }
+
+    if (results.length > 0) return results
+
+    // Fallback: extract any domain-like tokens.
+    const tokens = raw.match(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi) ?? []
+    for (const token of tokens) {
+      const normalized = normalizeDomain(token)
+      if (normalized) results.push({ domain: normalized })
+    }
+
+    return results
+  }
+
+  const uniqueByDomain = new Map<string, { domain: string; description?: string }>()
 
   for (const toolCall of toolCalls) {
     if (toolCall.function.name === "recommend_domains") {
-      try {
-        const args = JSON.parse(toolCall.function.arguments)
-        if (Array.isArray(args.domains)) {
-          results.push(...args.domains)
+      const argsRaw = toolCall.function.arguments
+      const parsed = typeof argsRaw === "string" ? safeJsonParse(argsRaw) : null
+
+      const domains = Array.isArray(parsed?.domains) ? parsed.domains : Array.isArray(parsed) ? parsed : null
+      if (domains) {
+        for (const entry of domains) {
+          const sanitized = sanitizeDomainEntry(entry)
+          if (!sanitized) continue
+          uniqueByDomain.set(sanitized.domain, sanitized)
         }
-      } catch (error) {
-        console.error("[Function Call] Parse error:", error)
+        continue
+      }
+
+      if (typeof argsRaw === "string") {
+        for (const entry of extractFromLooseArgs(argsRaw)) {
+          const sanitized = sanitizeDomainEntry(entry)
+          if (!sanitized) continue
+          uniqueByDomain.set(sanitized.domain, sanitized)
+        }
       }
     }
   }
 
-  return results
+  return Array.from(uniqueByDomain.values())
 }
 
 /**
