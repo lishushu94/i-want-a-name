@@ -55,64 +55,66 @@ export function WelcomeScreen({ input, setInput, onSubmit, isLoading, disableSub
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="max-w-2xl w-full text-center">
-        {/* Hero */}
-        <h1 className="text-4xl font-bold mb-3">{t("welcome.title")}</h1>
-        <p className="text-lg text-muted-foreground mb-8">{t("welcome.subtitle")}</p>
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="min-h-full flex flex-col items-center justify-start md:justify-center p-6 md:p-8">
+        <div className="max-w-2xl w-full text-center">
+          {/* Hero */}
+          <h1 className="text-3xl md:text-4xl font-bold mb-3">{t("welcome.title")}</h1>
+          <p className="text-base md:text-lg text-muted-foreground mb-8">{t("welcome.subtitle")}</p>
 
-        {/* Input */}
-        <form onSubmit={onSubmit} className="mb-8">
-          <div className="relative">
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={t("welcome.placeholder")}
-              className="min-h-[120px] resize-none rounded-xl pr-14 text-base"
-              disabled={isLoading || disableSubmit}
-            />
-            <Button
-              type="submit"
-              size="icon"
-              className="absolute bottom-3 right-3 h-10 w-10 rounded-lg"
-              disabled={isLoading || !input.trim() || disableSubmit}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-          {warning && <p className="text-xs text-destructive mt-2 text-left">{warning}</p>}
-        </form>
-
-        {/* Suggestions */}
-        <div className="mb-12">
-          <p className="text-sm text-muted-foreground mb-3">{t("welcome.tryOne")}</p>
-          <div className="flex flex-wrap gap-2 justify-center">
-            {suggestions.map((suggestion) => (
+          {/* Input */}
+          <form onSubmit={onSubmit} className="mb-8">
+            <div className="relative">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={t("welcome.placeholder")}
+                className="min-h-[96px] md:min-h-[120px] resize-none rounded-xl pr-14 text-base"
+                disabled={isLoading || disableSubmit}
+              />
               <Button
-                key={suggestion}
-                variant="outline"
-                size="sm"
-                className="text-xs bg-transparent"
-                onClick={() => setInput(suggestion)}
+                type="submit"
+                size="icon"
+                className="absolute bottom-3 right-3 h-10 w-10 rounded-lg"
+                disabled={isLoading || !input.trim() || disableSubmit}
               >
-                {suggestion}
+                <Send className="h-4 w-4" />
               </Button>
+            </div>
+            {warning && <p className="text-xs text-destructive mt-2 text-left">{warning}</p>}
+          </form>
+
+          {/* Suggestions */}
+          <div className="mb-12">
+            <p className="text-sm text-muted-foreground mb-3">{t("welcome.tryOne")}</p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {suggestions.map((suggestion) => (
+                <Button
+                  key={suggestion}
+                  variant="outline"
+                  size="sm"
+                  className="text-xs bg-transparent"
+                  onClick={() => setInput(suggestion)}
+                >
+                  {suggestion}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Features */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {features.map((feature) => (
+              <div key={feature.title} className="text-center p-4">
+                <div className="inline-flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10 mb-3">
+                  <feature.icon className="h-5 w-5 text-primary" />
+                </div>
+                <h3 className="font-medium mb-1">{feature.title}</h3>
+                <p className="text-sm text-muted-foreground">{feature.description}</p>
+              </div>
             ))}
           </div>
-        </div>
-
-        {/* Features */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {features.map((feature) => (
-            <div key={feature.title} className="text-center p-4">
-              <div className="inline-flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10 mb-3">
-                <feature.icon className="h-5 w-5 text-primary" />
-              </div>
-              <h3 className="font-medium mb-1">{feature.title}</h3>
-              <p className="text-sm text-muted-foreground">{feature.description}</p>
-            </div>
-          ))}
         </div>
       </div>
     </div>

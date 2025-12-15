@@ -33,10 +33,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Loader2, Bot, ArrowLeft, Languages, Check } from "lucide-react"
+import { Send, Loader2, Bot, ArrowLeft, Languages, Check, Menu } from "lucide-react"
 import { useI18n } from "@/lib/i18n-context"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { resolveProviderConfig } from "@/lib/provider-runtime"
+import { cn } from "@/lib/utils"
 
 type ViewType = "home" | "chat" | "settings"
 
@@ -50,6 +51,7 @@ export function ChatInterface() {
   const [currentConversationId, setCurrentConvId] = useState<string | null>(null)
   const [viewType, setViewType] = useState<ViewType>("home")
   const [mounted, setMounted] = useState(false)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const missingApiKey = !(settings ? resolveProviderConfig(settings)?.apiKey?.trim() : "")
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -434,9 +436,9 @@ export function ChatInterface() {
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden relative">
+    <div className="flex h-[100dvh] bg-background overflow-hidden relative">
       {mounted && (
-        <div className="absolute top-3 right-4 z-20 flex items-center gap-3">
+        <div className="absolute top-[calc(env(safe-area-inset-top)+0.75rem)] right-[calc(env(safe-area-inset-right)+0.75rem)] z-20 flex items-center gap-3">
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -457,24 +459,79 @@ export function ChatInterface() {
           </DropdownMenu>
         </div>
       )}
-      <Sidebar
-        conversations={conversations}
-        currentId={currentConversationId}
-        onSelect={handleSelectConversation}
-        onDelete={handleDeleteConversation}
-        onNew={handleNewConversation}
-        showSettings={viewType === "settings"}
-        onSettingsClick={handleSettingsClick}
-        onUpdateTitle={handleUpdateTitle}
-      />
+
+      {/* Desktop sidebar */}
+      <div className="hidden md:block">
+        <Sidebar
+          conversations={conversations}
+          currentId={currentConversationId}
+          onSelect={handleSelectConversation}
+          onDelete={handleDeleteConversation}
+          onNew={handleNewConversation}
+          showSettings={viewType === "settings"}
+          onSettingsClick={handleSettingsClick}
+          onUpdateTitle={handleUpdateTitle}
+        />
+      </div>
+
+      {/* Mobile sidebar drawer */}
+      <div
+        className={cn(
+          "fixed inset-0 z-40 md:hidden",
+          mobileSidebarOpen ? "pointer-events-auto" : "pointer-events-none",
+        )}
+        aria-hidden={!mobileSidebarOpen}
+      >
+        <div
+          className={cn(
+            "absolute inset-0 bg-black/50 transition-opacity",
+            mobileSidebarOpen ? "opacity-100" : "opacity-0",
+          )}
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+        <div
+          className={cn(
+            "absolute inset-y-0 left-0 w-72 max-w-[85vw] transition-transform",
+            mobileSidebarOpen ? "translate-x-0" : "-translate-x-full",
+          )}
+        >
+          <Sidebar
+            variant="mobile"
+            className="shadow-2xl"
+            onRequestClose={() => setMobileSidebarOpen(false)}
+            conversations={conversations}
+            currentId={currentConversationId}
+            onSelect={handleSelectConversation}
+            onDelete={handleDeleteConversation}
+            onNew={handleNewConversation}
+            showSettings={viewType === "settings"}
+            onSettingsClick={handleSettingsClick}
+            onUpdateTitle={handleUpdateTitle}
+          />
+        </div>
+      </div>
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         {viewType === "settings" ? (
-          <SettingsPanel onSettingsChange={handleSettingsChange} onConversationsChange={handleConversationsChange} />
+          <SettingsPanel
+            onOpenSidebar={() => setMobileSidebarOpen(true)}
+            onSettingsChange={handleSettingsChange}
+            onConversationsChange={handleConversationsChange}
+          />
         ) : viewType === "home" ? (
           <>
-            <header className="flex items-center justify-between px-6 py-4 shrink-0">
-              <span className="text-sm text-muted-foreground">i want a name</span>
+            <header className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 shrink-0">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 md:hidden"
+                  onClick={() => setMobileSidebarOpen(true)}
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+                <span className="text-sm text-muted-foreground">i want a name</span>
+              </div>
             </header>
             <WelcomeScreen
               input={input}
@@ -487,8 +544,16 @@ export function ChatInterface() {
           </>
         ) : (
           <>
-            <header className="flex items-center justify-between px-6 py-4 shrink-0">
+            <header className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 shrink-0">
               <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 md:hidden"
+                  onClick={() => setMobileSidebarOpen(true)}
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleBackToHome}>
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
@@ -500,7 +565,7 @@ export function ChatInterface() {
               </div>
             </header>
 
-            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 min-h-0">
+            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-3 md:p-4 min-h-0">
               <div className="max-w-3xl mx-auto">
                 {messages.map((message) => (
                   <ChatMessage key={message.id} message={message} onRefreshDomains={handleRefreshDomains} />
@@ -520,7 +585,7 @@ export function ChatInterface() {
               </div>
             </div>
 
-            <div className="p-4 border-t border-border/20 bg-background shrink-0">
+            <div className="p-3 md:p-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:pb-4 border-t border-border/20 bg-background shrink-0">
               <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
                 <div className="flex gap-2 items-end">
                   <Textarea

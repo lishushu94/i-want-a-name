@@ -13,6 +13,8 @@ export type ProviderPreset = {
   kind: ProviderVendorKind
   label: string
   enabled: boolean
+  iconSrc?: string
+  iconDarkInvert?: boolean
   defaultEndpoint?: string
   defaultModel?: string
   models?: string[]
@@ -27,6 +29,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     kind: "openai_compatible",
     label: "OpenAI",
     enabled: true,
+    iconSrc: "/icons/providers/openai.svg",
+    iconDarkInvert: true,
     defaultEndpoint: "https://api.openai.com/v1",
     defaultModel: "gpt-4o-mini",
     models: ["gpt-5-chat", "gpt-4o", "gpt-4o-mini"],
@@ -38,6 +42,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     kind: "openai_compatible",
     label: "OpenRouter",
     enabled: true,
+    iconSrc: "/icons/providers/openrouter.svg",
+    iconDarkInvert: true,
     defaultEndpoint: "https://openrouter.ai/api/v1",
     apiKeyHelpUrl: "https://openrouter.ai/keys",
     // Models vary; keep empty and let user type or paste.
@@ -47,6 +53,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     kind: "openai_compatible",
     label: "DeepSeek",
     enabled: true,
+    iconSrc: "/icons/providers/deepseek-color.svg",
     defaultEndpoint: "https://api.deepseek.com",
     defaultModel: "deepseek-chat",
     models: ["deepseek-chat", "deepseek-reasoner"],
@@ -57,6 +64,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     kind: "openai_compatible",
     label: "智谱 (BigModel)",
     enabled: true,
+    iconSrc: "/icons/providers/zhipu-color.svg",
     defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-4.6",
     models: ["glm-4.6"],

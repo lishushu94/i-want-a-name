@@ -1,12 +1,8 @@
 import type React from "react"
-import type { Metadata } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+import type { Metadata, Viewport } from "next"
 import { I18nProvider } from "@/lib/i18n-context"
 import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
-
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "i want a name - AI Domain Name Finder",
@@ -17,6 +13,12 @@ export const metadata: Metadata = {
     { rel: "shortcut icon", url: "/icon.svg" },
     { rel: "apple-touch-icon", url: "/icon.svg" },
   ],
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 }
 
 export default function RootLayout({
