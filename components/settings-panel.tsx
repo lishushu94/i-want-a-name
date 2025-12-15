@@ -18,13 +18,14 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Eye, EyeOff, Check, RotateCcw, Plus, Trash2, Upload, Download, Copy } from "lucide-react"
+import { Eye, EyeOff, Check, RotateCcw, Plus, Trash2, Upload, Download, Copy, Menu, Plug } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n-context"
 import { PROVIDER_PRESETS, getProviderPreset } from "@/lib/provider-catalog"
 import { fetchOpenRouterModels } from "@/lib/openrouter"
 
 interface SettingsPanelProps {
+  onOpenSidebar?: () => void
   onSettingsChange?: (settings: Settings) => void
   onConversationsChange?: (conversations: Conversation[]) => void
 }
@@ -35,7 +36,7 @@ const MODELS = [
   { value: "gpt-4o-mini", label: "gpt-4o-mini" },
 ]
 
-export function SettingsPanel({ onSettingsChange, onConversationsChange }: SettingsPanelProps) {
+export function SettingsPanel({ onOpenSidebar, onSettingsChange, onConversationsChange }: SettingsPanelProps) {
   const { t, language, setLanguage } = useI18n()
   const [settings, setSettings] = useState<Settings>({
     apiKey: "",
@@ -83,6 +84,34 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
       : activePreset?.models && activePreset.models.length > 0
         ? activePreset.models.map((m) => ({ value: m, label: m }))
         : MODELS
+
+  const renderProviderIcon = (presetId: string) => {
+    const preset = getProviderPreset(presetId)
+    const src = preset?.iconSrc
+    if (!src) {
+      return (
+        <span className="inline-flex size-5 items-center justify-center rounded-full border bg-muted text-muted-foreground">
+          <Plug className="size-3.5" aria-hidden />
+        </span>
+      )
+    }
+
+    return (
+      <span className="inline-flex size-5 items-center justify-center rounded-full border bg-muted">
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className={cn(
+            "block size-3.5 object-contain",
+            preset.iconDarkInvert ? "dark:brightness-0 dark:invert" : null,
+          )}
+          aria-hidden
+        />
+      </span>
+    )
+  }
 
   const updateActiveConfig = (patch: Partial<ProviderConfig>) => {
     const nextConfig: ProviderConfig = { ...activeConfig, ...patch }
@@ -324,15 +353,28 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <header className="px-6 py-4 shrink-0">
-        <div>
-          <h1 className="text-xl font-semibold">{t("settings.title")}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{t("settings.description")}</p>
+      <header className="px-4 py-3 md:px-6 md:py-4 shrink-0">
+        <div className="flex items-start gap-3">
+          {onOpenSidebar && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 md:hidden -ml-1"
+              onClick={onOpenSidebar}
+              aria-label="Menu"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          )}
+          <div>
+            <h1 className="text-xl font-semibold">{t("settings.title")}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{t("settings.description")}</p>
+          </div>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-2xl space-y-8 pb-8">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        <div className="max-w-2xl space-y-6 md:space-y-8 pb-8">
           {/* Provider Selection Section */}
           <section className="space-y-4">
             <h2 className="text-lg font-medium border-b pb-2">{t("settings.apiConfig")}</h2>
@@ -367,12 +409,21 @@ export function SettingsPanel({ onSettingsChange, onConversationsChange }: Setti
                 }}
               >
                 <SelectTrigger id="providerPreset">
-                  <SelectValue placeholder={t("settings.providerPreset")} />
+                  <SelectValue placeholder={t("settings.providerPreset")}>
+                    {renderProviderIcon(activeVendor)}
+                    <span>{activePreset?.label ?? activeVendor}</span>
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {PROVIDER_PRESETS.map((preset) => (
-                    <SelectItem key={preset.id} value={preset.id} disabled={!preset.enabled}>
-                      {preset.label}
+                    <SelectItem
+                      key={preset.id}
+                      value={preset.id}
+                      textValue={preset.label}
+                      disabled={!preset.enabled}
+                    >
+                      {renderProviderIcon(preset.id)}
+                      <span>{preset.label}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>

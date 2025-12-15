@@ -44,6 +44,9 @@ interface SidebarProps {
   showSettings: boolean
   onSettingsClick: () => void
   onUpdateTitle?: (id: string, title: string) => void
+  variant?: "desktop" | "mobile"
+  className?: string
+  onRequestClose?: () => void
 }
 
 export function Sidebar({
@@ -55,12 +58,21 @@ export function Sidebar({
   showSettings,
   onSettingsClick,
   onUpdateTitle,
+  variant = "desktop",
+  className,
+  onRequestClose,
 }: SidebarProps) {
   const { t } = useI18n()
   const [collapsed, setCollapsed] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const isMobile = variant === "mobile"
+  const isCollapsed = isMobile ? false : collapsed
+
+  const closeIfMobile = () => {
+    if (isMobile) onRequestClose?.()
+  }
 
   const formatDate = (timestamp: number) => {
     const date = new Date(timestamp)
@@ -77,8 +89,11 @@ export function Sidebar({
     <>
       <div
         className={cn(
-          "h-screen bg-muted/30 border-r border-border/40 flex flex-col shrink-0 overflow-hidden transition-all duration-300",
-          collapsed ? "w-16" : "w-72",
+          "h-[100dvh] border-r border-border/40 flex flex-col shrink-0 overflow-hidden transition-all duration-300",
+          isMobile ? "bg-background" : "bg-muted/30",
+          isCollapsed ? "w-16" : "w-72",
+          isMobile && "h-full",
+          className,
         )}
       >
         {/* Hamburger Menu */}
@@ -87,27 +102,36 @@ export function Sidebar({
             variant="ghost"
             size="icon"
             className="h-10 w-10"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={() => {
+              if (isMobile) {
+                onRequestClose?.()
+              } else {
+                setCollapsed(!collapsed)
+              }
+            }}
           >
-            <Menu className="h-5 w-5" />
+            {isMobile ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </div>
 
         {/* New Chat Button */}
         <div className="p-3 shrink-0">
           <Button
-            onClick={onNew}
+            onClick={() => {
+              onNew()
+              closeIfMobile()
+            }}
             variant="ghost"
             size="icon"
-            className={cn("h-10 w-10", !collapsed && "w-full justify-start gap-2")}
+            className={cn("h-10 w-10", !isCollapsed && "w-full justify-start gap-2")}
           >
             <Plus className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>{t("common.newChat")}</span>}
+            {!isCollapsed && <span>{t("common.newChat")}</span>}
           </Button>
         </div>
 
         {/* Conversations List */}
-        {!collapsed && (
+        {!isCollapsed && (
           <ScrollArea className="flex-1 px-3">
             <div className="space-y-1 pb-4">
               {conversations.map((conv) => (
@@ -117,7 +141,11 @@ export function Sidebar({
                     "relative flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors group",
                     currentId === conv.id && !showSettings ? "bg-primary/10 text-primary" : "hover:bg-muted",
                   )}
-                  onClick={() => !editingId && onSelect(conv)}
+                  onClick={() => {
+                    if (editingId) return
+                    onSelect(conv)
+                    closeIfMobile()
+                  }}
                 >
                   {editingId === conv.id ? (
                       <div className="flex-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -220,17 +248,20 @@ export function Sidebar({
         )}
 
         {/* Spacer for collapsed state */}
-        {collapsed && <div className="flex-1" />}
+        {isCollapsed && <div className="flex-1" />}
 
         {/* Settings Button */}
         <div className="p-3 border-t border-border/30 shrink-0">
           <Button
-            onClick={onSettingsClick}
+            onClick={() => {
+              onSettingsClick()
+              closeIfMobile()
+            }}
             variant={showSettings ? "secondary" : "ghost"}
-            className={cn("w-full justify-start gap-2", collapsed && "justify-center px-2")}
+            className={cn("w-full justify-start gap-2", isCollapsed && "justify-center px-2")}
           >
             <Settings className="h-4 w-4" />
-            {!collapsed && <span>{t("common.settings")}</span>}
+            {!isCollapsed && <span>{t("common.settings")}</span>}
           </Button>
         </div>
       </div>

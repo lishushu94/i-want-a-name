@@ -35,11 +35,11 @@ export function ChatMessage({ message, onRefreshDomains }: ChatMessageProps) {
   const domainsWithDescriptions = message.domains?.filter((d) => d.description) || []
 
   return (
-    <div className={cn("flex gap-3 py-4 group", isUser ? "flex-row-reverse" : "flex-row")}>
+    <div className={cn("flex gap-2 sm:gap-3 py-4 group", isUser ? "flex-row-reverse" : "flex-row")}>
       {/* Avatar */}
       <div
         className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+          "flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full",
           isUser ? "bg-primary" : "bg-muted",
         )}
       >
@@ -54,7 +54,7 @@ export function ChatMessage({ message, onRefreshDomains }: ChatMessageProps) {
       <div className={cn("flex-1 min-w-0", isUser ? "flex flex-col items-end" : "")}>
         {/* Copy button - only for assistant */}
         {!isUser && (
-          <div className="flex items-center gap-2 mb-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-2 mb-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
             <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-muted-foreground" onClick={handleCopy}>
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
             </Button>
@@ -64,8 +64,10 @@ export function ChatMessage({ message, onRefreshDomains }: ChatMessageProps) {
         {/* Message bubble */}
         <div
           className={cn(
-            "rounded-2xl px-4 py-3 text-sm",
-            isUser ? "bg-primary text-primary-foreground max-w-[80%]" : "bg-muted text-foreground w-full",
+            "rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm",
+            isUser
+              ? "bg-primary text-primary-foreground max-w-[90%] sm:max-w-[80%]"
+              : "bg-muted text-foreground w-full",
           )}
         >
           <div

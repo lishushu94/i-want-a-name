@@ -54,16 +54,16 @@ export function DomainCard({ domains, messageId, onRefresh }: DomainCardProps) {
     <TooltipProvider>
       <div className="mt-3 rounded-lg border border-border bg-card p-4 w-full">
         {/* Header with stats */}
-        <div className="flex items-center justify-between mb-3 pb-2 border-b border-border/50">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 pb-2 border-b border-border/50">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 min-w-0">
             <span className="text-sm font-medium text-muted-foreground">Domain Availability</span>
             {lastChecked && (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground break-words">
                 Last checked {new Date(lastChecked).toLocaleString()}
               </span>
             )}
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2 items-center">
             {availableCount > 0 && (
               <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 border-0">
                 {availableCount} available
